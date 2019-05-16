@@ -706,4 +706,48 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 		HelpGroup: consts.SliverWinHelpGroup,
 	})
 
+	// [ Portfwd ] -----------------------------------------------------------------
+	portfwd := &grumble.Command{
+		Name:      consts.PortfwdStr,
+		Help:      "Forward a local TCP port to a remote port",
+		LongHelp:  help.GetHelpFor(consts.PortfwdStr),
+		AllowArgs: false,
+		Flags: func(f *grumble.Flags) {
+			f.String("L", "local-host", "127.0.0.1", "The local host to listen on (IP or domain name)")
+			f.Uint("l", "local-port", 0, "The local port to listen on")
+			f.String("r", "remote-host", "", "The remote host to connect to")
+			f.Uint("p", "remote-port", 0, "The remote port to connect to")
+		},
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			portfwd(ctx, server)
+			fmt.Println()
+			return nil
+		},
+	}
+	portfwd.AddCommand(&grumble.Command{
+		Name:      "list",
+		Help:      "List current port forwarding rules",
+		LongHelp:  help.GetHelpFor(consts.PortfwdStr),
+		AllowArgs: false,
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			portfwdList(ctx, server)
+			fmt.Println()
+			return nil
+		},
+	})
+	portfwd.AddCommand(&grumble.Command{
+		Name:      "delete",
+		Help:      "Delete a port forwarding rule",
+		LongHelp:  help.GetHelpFor(consts.PortfwdStr),
+		AllowArgs: true,
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			portfwdDelete(ctx, server)
+			fmt.Println()
+			return nil
+		},
+	})
+	app.AddCommand(portfwd)
 }

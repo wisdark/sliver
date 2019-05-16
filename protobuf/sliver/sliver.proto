@@ -161,9 +161,7 @@ message GetSystemReq {
   uint32 SliverID = 9;
 }
 
-message GetSystem {
-  string Output = 1;
-}
+message GetSystem { string Output = 1; }
 
 message ElevateReq {
   int32 Timeout = 8;
@@ -241,4 +239,17 @@ message Shell {
   string Err = 2;
 
   uint64 TunnelID = 9;
+}
+
+message PortFwdReq {
+  uint32 SliverID = 1;
+  string Host = 2;
+  uint32 Port = 3;
+
+  uint64 TunnelID = 9;
+}
+
+message PortFwd {
+  bool Success = 1;
+  string Err = 2;
 }

@@ -63,7 +63,8 @@ var (
 		sliverpb.MsgDownloadReq: rpcDownload,
 		sliverpb.MsgUploadReq:   rpcUpload,
 
-		sliverpb.MsgShellReq: rpcShell,
+		sliverpb.MsgShellReq:   rpcShell,
+		sliverpb.MsgPortfwdReq: rpcPortfwd,
 
 		clientpb.MsgTask:    rpcLocalTask,
 		clientpb.MsgMigrate: rpcMigrate,

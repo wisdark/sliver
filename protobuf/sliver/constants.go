@@ -64,6 +64,9 @@ const (
 	// MsgShell - Response on starting shell
 	MsgShell
 
+	// MsgPortfwdReq - Request to forward a port
+	MsgPortfwdReq
+
 	// MsgTunnelData - Data for duplex tunnels
 	MsgTunnelData
 	// MsgTunnelClose - Close a duplex tunnel

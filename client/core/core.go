@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"sliver/client/assets"
 
 	clientpb "sliver/protobuf/client"
@@ -17,8 +19,11 @@ import (
 )
 
 const (
-	randomIDSize = 16 // 64bits
+	randomIDSize   = 16 // 64bits
+	forwardTimeout = 5 * time.Second
 )
+
+var fwdID uint32
 
 type tunnels struct {
 	server  *SliverServer
@@ -81,15 +86,89 @@ func (t *tunnel) Send(data []byte) {
 	}
 }
 
+// Forwarder stores the configuration for a local port forwarder
+type Forwarder struct {
+	listener *net.Listener
+	SliverID uint32
+	ID       uint32
+	server   *SliverServer
+	LHost    string
+	LPort    uint
+	RHost    string
+	RPort    uint
+}
+
+func (f *Forwarder) listenAndForward() {
+	for {
+		conn, _ := (*f.listener).Accept()
+		// Create new tunnel
+		t, err := f.server.CreateTunnel(f.SliverID, forwardTimeout)
+		if err != nil {
+			return
+		}
+		data, _ := proto.Marshal(&sliverpb.PortFwdReq{
+			SliverID: f.SliverID,
+			Host:     f.RHost,
+			Port:     uint32(f.RPort),
+			TunnelID: t.ID,
+		})
+		resp := <-f.server.RPC(&sliverpb.Envelope{
+			Type: sliverpb.MsgPortfwdReq,
+			Data: data,
+		}, forwardTimeout)
+		if resp.Err != "" {
+			break
+		}
+		cleanup := func() {
+			tunnelClose, _ := proto.Marshal(&sliverpb.PortFwdReq{
+				TunnelID: t.ID,
+			})
+			f.server.RPC(&sliverpb.Envelope{
+				Type: sliverpb.MsgTunnelClose,
+				Data: tunnelClose,
+			}, forwardTimeout)
+			conn.Close()
+		}
+		// Copy the incoming data from the tunnel into the net.Conn
+		go func() {
+			defer cleanup()
+			for data := range t.Recv {
+				conn.Write(data)
+			}
+		}()
+		// Copy incoming data into the tunnel Read chan
+		readBuf := make([]byte, 128)
+		for {
+			// In case the conn has been shutdown
+			if conn != nil {
+				n, err := conn.Read(readBuf)
+				if err == io.EOF {
+					break
+				}
+				if err == nil && 0 < n {
+					t.Send(readBuf[:n])
+				}
+			}
+		}
+	}
+}
+
+// Forwarders stores the map of all port forwarders
+type Forwarders struct {
+	Forwarders map[uint32]*Forwarder
+	server     *SliverServer
+}
+
 // SliverServer - Server info
 type SliverServer struct {
-	Send      chan *sliverpb.Envelope
-	recv      chan *sliverpb.Envelope
-	responses *map[uint64]chan *sliverpb.Envelope
-	mutex     *sync.RWMutex
-	Config    *assets.ClientConfig
-	Events    chan *clientpb.Event
-	Tunnels   *tunnels
+	Send       chan *sliverpb.Envelope
+	recv       chan *sliverpb.Envelope
+	responses  *map[uint64]chan *sliverpb.Envelope
+	mutex      *sync.RWMutex
+	Config     *assets.ClientConfig
+	Events     chan *clientpb.Event
+	Tunnels    *tunnels
+	Forwarders *Forwarders
 }
 
 // CreateTunnel - Create a new tunnel on the server, returns tunnel metadata
@@ -197,6 +276,52 @@ func (ss *SliverServer) RemoveRespListener(envelopeID uint64) {
 	delete((*ss.responses), envelopeID)
 }
 
+// StartForwardListener - Starts a local TCP listener to be used by the port forwarder
+func (ss *SliverServer) StartForwardListener(localhost string, localport uint, remotehost string, remoteport uint, sliverID uint32) error {
+	lst, err := net.Listen("tcp", fmt.Sprintf("%s:%d", localhost, localport))
+	if err != nil {
+		return err
+	}
+	fwd := &Forwarder{
+		server:   ss,
+		SliverID: sliverID,
+		listener: &lst,
+		ID:       nextForwarderID(),
+		LHost:    localhost,
+		LPort:    localport,
+		RHost:    remotehost,
+		RPort:    remoteport,
+	}
+	ss.addForwarder(fwd)
+	go fwd.listenAndForward()
+	return nil
+}
+
+// GetForwarder retrieves a port forwarder based on its identifier
+func (ss *SliverServer) GetForwarder(fID uint32) (*Forwarder, error) {
+	fwd, ok := ss.Forwarders.Forwarders[fID]
+	if ok {
+		return fwd, nil
+	}
+	return nil, fmt.Errorf("no forwarder found for id %d", fID)
+}
+
+func (ss *SliverServer) addForwarder(fwd *Forwarder) {
+	ss.Forwarders.Forwarders[fwdID] = fwd
+	fwdID++
+}
+
+// DeleteForwarder stops and remove a forwarder from the list
+func (ss *SliverServer) DeleteForwarder(fid uint32) error {
+	if fwd, ok := ss.Forwarders.Forwarders[fid]; ok {
+		(*fwd.listener).Close()
+		delete(ss.Forwarders.Forwarders, fid)
+		log.Printf("killed port forwarder %d\n", fid)
+		return nil
+	}
+	return fmt.Errorf("no forwarder found with id %d", fid)
+}
+
 // BindSliverServer - Bind send/recv channels to a server
 func BindSliverServer(send, recv chan *sliverpb.Envelope) *SliverServer {
 	server := &SliverServer{
@@ -211,6 +336,10 @@ func BindSliverServer(send, recv chan *sliverpb.Envelope) *SliverServer {
 		tunnels: &map[uint64]*tunnel{},
 		mutex:   &sync.RWMutex{},
 	}
+	server.Forwarders = &Forwarders{
+		Forwarders: map[uint32]*Forwarder{},
+		server:     server,
+	}
 	return server
 }
 
@@ -219,4 +348,8 @@ func EnvelopeID() uint64 {
 	randBuf := make([]byte, 8) // 64 bits of randomness
 	rand.Read(randBuf)
 	return binary.LittleEndian.Uint64(randBuf)
+}
+
+func nextForwarderID() uint32 {
+	return uint32(fwdID + 1)
 }

@@ -86,6 +86,7 @@ const (
 	ExecuteAssemblyStr  = "execute-assembly"
 	ExecuteShellcodeStr = "execute-shellcode"
 	MigrateStr          = "migrate"
+	PortfwdStr          = "portfwd"
 
 	GenericHelpGroup     = "Generic:"
 	SliverHelpGroup      = "Sliver:"

