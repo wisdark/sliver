@@ -3,13 +3,14 @@ package rpc
 import (
 	"fmt"
 	"sliver/server/core"
+	"time"
 
-	sliverpb "sliver/protobuf/sliver"
+	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
 
 	"github.com/golang/protobuf/proto"
 )
 
-func rpcPortfwd(req []byte, resp RPCResponse) {
+func rpcPortfwd(req []byte, timeout time.Duration, resp RPCResponse) {
 	pfwdReq := &sliverpb.PortFwdReq{}
 	proto.Unmarshal(req, pfwdReq)
 
@@ -27,6 +28,6 @@ func rpcPortfwd(req []byte, resp RPCResponse) {
 		return
 	}
 	rpcLog.Info(fmt.Sprintf("Requesting Sliver %d to start a forward rule to %s:%d", sliver.ID, pfwdReq.Host, pfwdReq.Port))
-	data, err := sliver.Request(sliverpb.MsgPortfwdReq, defaultTimeout, startPortFwdReq)
+	data, err := sliver.Request(sliverpb.MsgPortfwdReq, timeout, startPortFwdReq)
 	resp(data, err)
 }

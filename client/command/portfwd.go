@@ -3,10 +3,11 @@ package command
 import (
 	"fmt"
 	"os"
-	"sliver/client/core"
 	"strconv"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/bishopfox/sliver/client/core"
 
 	"github.com/desertbit/grumble"
 )
