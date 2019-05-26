@@ -2,8 +2,9 @@ package rpc
 
 import (
 	"fmt"
-	"sliver/server/core"
 	"time"
+
+	"github.com/bishopfox/sliver/server/core"
 
 	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
 
