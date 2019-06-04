@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -50,7 +50,7 @@ func killAllJobs(rpc RPCServer) {
 func killJob(jobID int32, rpc RPCServer) {
 	fmt.Printf(Info+"Killing job #%d ...\n", jobID)
 	data, _ := proto.Marshal(&clientpb.JobKillReq{ID: jobID})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgJobKill,
 		Data: data,
 	}, defaultTimeout)
@@ -69,7 +69,7 @@ func killJob(jobID int32, rpc RPCServer) {
 }
 
 func getJobs(rpc RPCServer) *clientpb.Jobs {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgJobs,
 		Data: []byte{},
 	}, defaultTimeout)
@@ -113,7 +113,7 @@ func startMTLSListener(ctx *grumble.Context, rpc RPCServer) {
 		Server: server,
 		LPort:  int32(lport),
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgMtls,
 		Data: data,
 	}, defaultTimeout)
@@ -141,7 +141,7 @@ func startDNSListener(ctx *grumble.Context, rpc RPCServer) {
 		Domains:  domains,
 		Canaries: !ctx.Flags.Bool("no-canaries"),
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgDns,
 		Data: data,
 	}, defaultTimeout)
@@ -176,7 +176,7 @@ func startHTTPSListener(ctx *grumble.Context, rpc RPCServer) {
 		Key:     key,
 		ACME:    ctx.Flags.Bool("lets-encrypt"),
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgHttps,
 		Data: data,
 	}, defaultTimeout)
@@ -215,7 +215,7 @@ func startHTTPListener(ctx *grumble.Context, rpc RPCServer) {
 		LPort:   int32(lport),
 		Secure:  false,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgHttp,
 		Data: data,
 	}, defaultTimeout)

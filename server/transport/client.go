@@ -12,7 +12,7 @@ import (
 
 	consts "github.com/bishopfox/sliver/client/constants"
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/certs"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/log"
@@ -141,7 +141,7 @@ func handleClientConnection(conn net.Conn) {
 					if err != nil {
 						errStr = fmt.Sprintf("%v", err)
 					}
-					client.Send <- &sliverpb.Envelope{
+					client.Send <- &implantpb.Envelope{
 						ID:   envelope.ID,
 						Data: data,
 						Err:  errStr,
@@ -158,14 +158,14 @@ func handleClientConnection(conn net.Conn) {
 					if err != nil {
 						errStr = fmt.Sprintf("%v", err)
 					}
-					client.Send <- &sliverpb.Envelope{
+					client.Send <- &implantpb.Envelope{
 						ID:   envelope.ID,
 						Data: data,
 						Err:  errStr,
 					}
 				})
 			} else {
-				client.Send <- &sliverpb.Envelope{
+				client.Send <- &implantpb.Envelope{
 					ID:   envelope.ID,
 					Data: []byte{},
 					Err:  "Unknown rpc command",
@@ -209,7 +209,7 @@ func socketEventLoop(conn net.Conn, events chan core.Event) {
 		}
 
 		data, _ := proto.Marshal(pbEvent)
-		envelope := &sliverpb.Envelope{
+		envelope := &implantpb.Envelope{
 			Type: clientpb.MsgEvent,
 			Data: data,
 		}
@@ -224,7 +224,7 @@ func socketEventLoop(conn net.Conn, events chan core.Event) {
 // socketWriteEnvelope - Writes a message to the TLS socket using length prefix framing
 // which is a fancy way of saying we write the length of the message then the message
 // e.g. [uint32 length|message] so the reciever can delimit messages properly
-func socketWriteEnvelope(connection net.Conn, envelope *sliverpb.Envelope) error {
+func socketWriteEnvelope(connection net.Conn, envelope *implantpb.Envelope) error {
 	data, err := proto.Marshal(envelope)
 	if err != nil {
 		clientLog.Errorf("Envelope marshaling error: %v", err)
@@ -239,7 +239,7 @@ func socketWriteEnvelope(connection net.Conn, envelope *sliverpb.Envelope) error
 
 // socketReadEnvelope - Reads a message from the TLS connection using length prefix framing
 // returns messageType, message, and error
-func socketReadEnvelope(connection net.Conn) (*sliverpb.Envelope, error) {
+func socketReadEnvelope(connection net.Conn) (*implantpb.Envelope, error) {
 
 	// Read the first four bytes to determine data length
 	dataLengthBuf := make([]byte, 4) // Size of uint32
@@ -277,7 +277,7 @@ func socketReadEnvelope(connection net.Conn) (*sliverpb.Envelope, error) {
 		return nil, err
 	}
 	// Unmarshal the protobuf envelope
-	envelope := &sliverpb.Envelope{}
+	envelope := &implantpb.Envelope{}
 	err = proto.Unmarshal(dataBuf, envelope)
 	if err != nil {
 		clientLog.Errorf("unmarshaling envelope error: %v", err)

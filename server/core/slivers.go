@@ -6,7 +6,7 @@ import (
 	"time"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 )
 
 var (
@@ -33,8 +33,8 @@ type Sliver struct {
 	PID           int32
 	Filename      string
 	LastCheckin   *time.Time
-	Send          chan *sliverpb.Envelope
-	Resp          map[uint64]chan *sliverpb.Envelope
+	Send          chan *implantpb.Envelope
+	Resp          map[uint64]chan *implantpb.Envelope
 	RespMutex     *sync.RWMutex
 	ActiveC2      string
 }
@@ -74,7 +74,7 @@ func (s *Sliver) Config() error {
 // Request - Sends a protobuf request to the active sliver and returns the response
 func (s *Sliver) Request(msgType uint32, timeout time.Duration, data []byte) ([]byte, error) {
 
-	resp := make(chan *sliverpb.Envelope)
+	resp := make(chan *implantpb.Envelope)
 	reqID := EnvelopeID()
 	s.RespMutex.Lock()
 	s.Resp[reqID] = resp
@@ -85,13 +85,13 @@ func (s *Sliver) Request(msgType uint32, timeout time.Duration, data []byte) ([]
 		// close(resp)
 		delete(s.Resp, reqID)
 	}()
-	s.Send <- &sliverpb.Envelope{
+	s.Send <- &implantpb.Envelope{
 		ID:   reqID,
 		Type: msgType,
 		Data: data,
 	}
 
-	var respEnvelope *sliverpb.Envelope
+	var respEnvelope *implantpb.Envelope
 	select {
 	case respEnvelope = <-resp:
 	case <-time.After(timeout):

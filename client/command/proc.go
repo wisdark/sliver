@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bishopfox/sliver/client/spin"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -33,16 +33,16 @@ func ps(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	data, _ := proto.Marshal(&sliverpb.PsReq{SliverID: ActiveSliver.Sliver.ID})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgPsReq,
+	data, _ := proto.Marshal(&implantpb.PsReq{SliverID: ActiveSliver.Sliver.ID})
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgPsReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
 		fmt.Printf(Warn+"Error: %s", resp.Err)
 		return
 	}
-	ps := &sliverpb.Ps{}
+	ps := &implantpb.Ps{}
 	err := proto.Unmarshal(resp.Data, ps)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -99,7 +99,7 @@ func ps(ctx *grumble.Context, rpc RPCServer) {
 }
 
 // printProcInfo - Stylizes the process information
-func printProcInfo(table *tabwriter.Writer, proc *sliverpb.Process) string {
+func printProcInfo(table *tabwriter.Writer, proc *implantpb.Process) string {
 	color := normal
 	if modifyColor, ok := knownProcs[proc.Executable]; ok {
 		color = modifyColor
@@ -136,19 +136,19 @@ func procdump(ctx *grumble.Context, rpc RPCServer) {
 
 	ctrl := make(chan bool)
 	go spin.Until("Dumping remote process memory ...", ctrl)
-	data, _ := proto.Marshal(&sliverpb.ProcessDumpReq{
+	data, _ := proto.Marshal(&implantpb.ProcessDumpReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Pid:      int32(pid),
 		Timeout:  int32(ctx.Flags.Int("timeout")),
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgProcessDumpReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgProcessDumpReq,
 		Data: data,
 	}, cmdTimeout)
 	ctrl <- true
 	<-ctrl
 
-	procDump := &sliverpb.ProcessDump{}
+	procDump := &implantpb.ProcessDump{}
 	proto.Unmarshal(resp.Data, procDump)
 	if procDump.Err != "" {
 		fmt.Printf(Warn+"Error %s\n", procDump.Err)
@@ -165,12 +165,12 @@ func procdump(ctx *grumble.Context, rpc RPCServer) {
 }
 
 func getPIDByName(name string, rpc RPCServer) int {
-	data, _ := proto.Marshal(&sliverpb.PsReq{SliverID: ActiveSliver.Sliver.ID})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgPsReq,
+	data, _ := proto.Marshal(&implantpb.PsReq{SliverID: ActiveSliver.Sliver.ID})
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgPsReq,
 		Data: data,
 	}, defaultTimeout)
-	ps := &sliverpb.Ps{}
+	ps := &implantpb.Ps{}
 	proto.Unmarshal(resp.Data, ps)
 	for _, proc := range ps.Processes {
 		if proc.Executable == name {

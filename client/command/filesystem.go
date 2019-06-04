@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/bishopfox/sliver/client/spin"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/util"
 
 	"github.com/AlecAivazis/survey"
@@ -30,12 +30,12 @@ func ls(ctx *grumble.Context, rpc RPCServer) {
 		ctx.Args = append(ctx.Args, ".")
 	}
 
-	data, _ := proto.Marshal(&sliverpb.LsReq{
+	data, _ := proto.Marshal(&implantpb.LsReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgLsReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgLsReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -43,7 +43,7 @@ func ls(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	dirList := &sliverpb.Ls{}
+	dirList := &implantpb.Ls{}
 	err := proto.Unmarshal(resp.Data, dirList)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -52,7 +52,7 @@ func ls(ctx *grumble.Context, rpc RPCServer) {
 	printDirList(dirList)
 }
 
-func printDirList(dirList *sliverpb.Ls) {
+func printDirList(dirList *implantpb.Ls) {
 	fmt.Printf("%s\n", dirList.Path)
 	fmt.Printf("%s\n", strings.Repeat("=", len(dirList.Path)))
 
@@ -78,12 +78,12 @@ func rm(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	data, _ := proto.Marshal(&sliverpb.RmReq{
+	data, _ := proto.Marshal(&implantpb.RmReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgRmReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgRmReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -91,7 +91,7 @@ func rm(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	rm := &sliverpb.Rm{}
+	rm := &implantpb.Rm{}
 	err := proto.Unmarshal(resp.Data, rm)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -117,12 +117,12 @@ func mkdir(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	data, _ := proto.Marshal(&sliverpb.MkdirReq{
+	data, _ := proto.Marshal(&implantpb.MkdirReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgMkdirReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgMkdirReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -130,7 +130,7 @@ func mkdir(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	mkdir := &sliverpb.Mkdir{}
+	mkdir := &implantpb.Mkdir{}
 	err := proto.Unmarshal(resp.Data, mkdir)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -154,12 +154,12 @@ func cd(ctx *grumble.Context, rpc RPCServer) {
 		ctx.Args = append(ctx.Args, ".")
 	}
 
-	data, _ := proto.Marshal(&sliverpb.CdReq{
+	data, _ := proto.Marshal(&implantpb.CdReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgCdReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgCdReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -167,7 +167,7 @@ func cd(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	pwd := &sliverpb.Pwd{}
+	pwd := &implantpb.Pwd{}
 	err := proto.Unmarshal(resp.Data, pwd)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -182,11 +182,11 @@ func pwd(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	data, _ := proto.Marshal(&sliverpb.PwdReq{
+	data, _ := proto.Marshal(&implantpb.PwdReq{
 		SliverID: ActiveSliver.Sliver.ID,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgPwdReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgPwdReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -194,7 +194,7 @@ func pwd(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	pwd := &sliverpb.Pwd{}
+	pwd := &implantpb.Pwd{}
 	err := proto.Unmarshal(resp.Data, pwd)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -214,12 +214,12 @@ func cat(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	data, _ := proto.Marshal(&sliverpb.DownloadReq{
+	data, _ := proto.Marshal(&implantpb.DownloadReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgDownloadReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgDownloadReq,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -227,7 +227,7 @@ func cat(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	download := &sliverpb.Download{}
+	download := &implantpb.Download{}
 	proto.Unmarshal(resp.Data, download)
 	if download.Encoder == "gzip" {
 		download.Data, _ = new(util.Gzip).Decode(download.Data)
@@ -274,12 +274,12 @@ func download(ctx *grumble.Context, rpc RPCServer) {
 
 	ctrl := make(chan bool)
 	go spin.Until(fmt.Sprintf("%s -> %s", fileName, dst), ctrl)
-	data, _ := proto.Marshal(&sliverpb.DownloadReq{
+	data, _ := proto.Marshal(&implantpb.DownloadReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgDownloadReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgDownloadReq,
 		Data: data,
 	}, cmdTimeout)
 	ctrl <- true
@@ -289,7 +289,7 @@ func download(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	download := &sliverpb.Download{}
+	download := &implantpb.Download{}
 	proto.Unmarshal(resp.Data, download)
 	if download.Encoder == "gzip" {
 		download.Data, _ = new(util.Gzip).Decode(download.Data)
@@ -339,14 +339,14 @@ func upload(ctx *grumble.Context, rpc RPCServer) {
 
 	ctrl := make(chan bool)
 	go spin.Until(fmt.Sprintf("%s -> %s", src, dst), ctrl)
-	data, _ := proto.Marshal(&sliverpb.UploadReq{
+	data, _ := proto.Marshal(&implantpb.UploadReq{
 		SliverID: ActiveSliver.Sliver.ID,
 		Path:     dst,
 		Data:     uploadGzip.Bytes(),
 		Encoder:  "gzip",
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgUploadReq,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgUploadReq,
 		Data: data,
 	}, cmdTimeout)
 	ctrl <- true
@@ -356,7 +356,7 @@ func upload(ctx *grumble.Context, rpc RPCServer) {
 		return
 	}
 
-	upload := &sliverpb.Upload{}
+	upload := &implantpb.Upload{}
 	err = proto.Unmarshal(resp.Data, upload)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)

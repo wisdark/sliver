@@ -17,7 +17,7 @@ import (
 	"time"
 
 	consts "github.com/bishopfox/sliver/client/constants"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/certs"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/cryptography"
@@ -325,7 +325,7 @@ func (s *SliverHTTPC2) startSessionHandler(resp http.ResponseWriter, req *http.R
 		resp.WriteHeader(404)
 		return
 	}
-	sessionInit := &sliverpb.HTTPSessionInit{}
+	sessionInit := &implantpb.HTTPSessionInit{}
 	proto.Unmarshal(sessionInitData, sessionInit)
 
 	session := newSession()
@@ -335,9 +335,9 @@ func (s *SliverHTTPC2) startSessionHandler(resp http.ResponseWriter, req *http.R
 		ID:            core.GetHiveID(),
 		Transport:     "http(s)",
 		RemoteAddress: req.RemoteAddr,
-		Send:          make(chan *sliverpb.Envelope, 16),
+		Send:          make(chan *implantpb.Envelope, 16),
 		RespMutex:     &sync.RWMutex{},
-		Resp:          map[uint64]chan *sliverpb.Envelope{},
+		Resp:          map[uint64]chan *implantpb.Envelope{},
 		LastCheckin:   &checkin,
 	}
 	core.Hive.AddSliver(session.Sliver)
@@ -381,7 +381,7 @@ func (s *SliverHTTPC2) sessionHandler(resp http.ResponseWriter, req *http.Reques
 		resp.WriteHeader(404)
 		return
 	}
-	envelope := &sliverpb.Envelope{}
+	envelope := &implantpb.Envelope{}
 	proto.Unmarshal(body, envelope)
 
 	handlers := sliverHandlers.GetSliverHandlers()

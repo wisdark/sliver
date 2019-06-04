@@ -8,7 +8,7 @@ package handlers
 
 import (
 	consts "github.com/bishopfox/sliver/client/constants"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/log"
 
@@ -19,9 +19,9 @@ var (
 	handlerLog = log.NamedLogger("handlers", "slivers")
 
 	serverHandlers = map[uint32]interface{}{
-		sliverpb.MsgRegister:    registerSliverHandler,
-		sliverpb.MsgTunnelData:  tunnelDataHandler,
-		sliverpb.MsgTunnelClose: tunnelCloseHandler,
+		implantpb.MsgRegister:    registerSliverHandler,
+		implantpb.MsgTunnelData:  tunnelDataHandler,
+		implantpb.MsgTunnelClose: tunnelCloseHandler,
 	}
 )
 
@@ -31,7 +31,7 @@ func GetSliverHandlers() map[uint32]interface{} {
 }
 
 func registerSliverHandler(sliver *core.Sliver, data []byte) {
-	register := &sliverpb.Register{}
+	register := &implantpb.Register{}
 	err := proto.Unmarshal(data, register)
 	if err != nil {
 		handlerLog.Warnf("error decoding message: %v", err)
@@ -61,13 +61,13 @@ func registerSliverHandler(sliver *core.Sliver, data []byte) {
 }
 
 func tunnelDataHandler(sliver *core.Sliver, data []byte) {
-	tunnelData := &sliverpb.TunnelData{}
+	tunnelData := &implantpb.TunnelData{}
 	proto.Unmarshal(data, tunnelData)
 	tunnel := core.Tunnels.Tunnel(tunnelData.TunnelID)
 	if tunnel != nil {
 		if sliver.ID == tunnel.Sliver.ID {
-			tunnel.Client.Send <- &sliverpb.Envelope{
-				Type: sliverpb.MsgTunnelData,
+			tunnel.Client.Send <- &implantpb.Envelope{
+				Type: implantpb.MsgTunnelData,
 				Data: data,
 			}
 		} else {
@@ -79,7 +79,7 @@ func tunnelDataHandler(sliver *core.Sliver, data []byte) {
 }
 
 func tunnelCloseHandler(sliver *core.Sliver, data []byte) {
-	tunnelClose := &sliverpb.TunnelClose{}
+	tunnelClose := &implantpb.TunnelClose{}
 	proto.Unmarshal(data, tunnelClose)
 	tunnel := core.Tunnels.Tunnel(tunnelClose.TunnelID)
 	if tunnel.Sliver.ID == sliver.ID {

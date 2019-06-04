@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/bishopfox/sliver/client/assets"
-	pb "github.com/bishopfox/sliver/protobuf/sliver"
+	pb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/golang/protobuf/proto"
 )

@@ -7,7 +7,7 @@ import (
 	"github.com/bishopfox/sliver/server/log"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 )
 
 var (
@@ -49,23 +49,23 @@ var (
 		clientpb.MsgGetSystemReq: rpcGetSystem,
 
 		// "Req"s directly map to responses
-		sliverpb.MsgPsReq:          rpcPs,
-		sliverpb.MsgKill:           rpcKill,
-		sliverpb.MsgProcessDumpReq: rpcProcdump,
+		implantpb.MsgPsReq:          rpcPs,
+		implantpb.MsgKill:           rpcKill,
+		implantpb.MsgProcessDumpReq: rpcProcdump,
 
-		sliverpb.MsgElevate:         rpcElevate,
-		sliverpb.MsgImpersonate:     rpcImpersonate,
-		sliverpb.MsgExecuteAssembly: rpcExecuteAssembly,
+		implantpb.MsgElevate:         rpcElevate,
+		implantpb.MsgImpersonate:     rpcImpersonate,
+		implantpb.MsgExecuteAssembly: rpcExecuteAssembly,
 
-		sliverpb.MsgLsReq:       rpcLs,
-		sliverpb.MsgRmReq:       rpcRm,
-		sliverpb.MsgMkdirReq:    rpcMkdir,
-		sliverpb.MsgCdReq:       rpcCd,
-		sliverpb.MsgPwdReq:      rpcPwd,
-		sliverpb.MsgDownloadReq: rpcDownload,
-		sliverpb.MsgUploadReq:   rpcUpload,
+		implantpb.MsgLsReq:       rpcLs,
+		implantpb.MsgRmReq:       rpcRm,
+		implantpb.MsgMkdirReq:    rpcMkdir,
+		implantpb.MsgCdReq:       rpcCd,
+		implantpb.MsgPwdReq:      rpcPwd,
+		implantpb.MsgDownloadReq: rpcDownload,
+		implantpb.MsgUploadReq:   rpcUpload,
 
-		sliverpb.MsgShellReq: rpcShell,
+		implantpb.MsgShellReq: rpcShell,
 
 		clientpb.MsgTask:    rpcLocalTask,
 		clientpb.MsgMigrate: rpcMigrate,
@@ -73,8 +73,8 @@ var (
 
 	tunHandlers = &map[uint32]TunnelHandler{
 		clientpb.MsgTunnelCreate: tunnelCreate,
-		sliverpb.MsgTunnelData:   tunnelData,
-		sliverpb.MsgTunnelClose:  tunnelClose,
+		implantpb.MsgTunnelData:  tunnelData,
+		implantpb.MsgTunnelClose: tunnelClose,
 	}
 )
 

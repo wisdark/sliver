@@ -12,14 +12,14 @@ import (
 	consts "github.com/bishopfox/sliver/client/constants"
 	clientcore "github.com/bishopfox/sliver/client/core"
 	"github.com/bishopfox/sliver/client/help"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/transport"
 )
 
 // Start - Starts the server console
 func Start() {
-	send := make(chan *sliverpb.Envelope) // To "server"
-	recv := make(chan *sliverpb.Envelope) // From "server"
+	send := make(chan *implantpb.Envelope) // To "server"
+	recv := make(chan *implantpb.Envelope) // From "server"
 
 	transport.LocalClientConnect(send, recv) // Simulates a client connection
 

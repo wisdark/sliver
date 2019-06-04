@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/bishopfox/sliver/client/core"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -41,13 +41,13 @@ func shell(ctx *grumble.Context, server *core.SliverServer) {
 		return
 	}
 
-	shellReqData, _ := proto.Marshal(&sliverpb.ShellReq{
+	shellReqData, _ := proto.Marshal(&implantpb.ShellReq{
 		SliverID:  ActiveSliver.Sliver.ID,
 		EnablePTY: !noPty,
 		TunnelID:  tunnel.ID,
 	})
-	resp := <-server.RPC(&sliverpb.Envelope{
-		Type: sliverpb.MsgShellReq,
+	resp := <-server.RPC(&implantpb.Envelope{
+		Type: implantpb.MsgShellReq,
 		Data: shellReqData,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -69,11 +69,11 @@ func shell(ctx *grumble.Context, server *core.SliverServer) {
 
 	cleanup := func() {
 		log.Printf("[client] cleanup tunnel %d", tunnel.ID)
-		tunnelClose, _ := proto.Marshal(&sliverpb.ShellReq{
+		tunnelClose, _ := proto.Marshal(&implantpb.ShellReq{
 			TunnelID: tunnel.ID,
 		})
-		server.RPC(&sliverpb.Envelope{
-			Type: sliverpb.MsgTunnelClose,
+		server.RPC(&implantpb.Envelope{
+			Type: implantpb.MsgTunnelClose,
 			Data: tunnelClose,
 		}, defaultTimeout)
 		if !noPty {

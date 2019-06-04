@@ -5,7 +5,7 @@ import (
 	"time"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/AlecAivazis/survey"
 	"github.com/golang/protobuf/proto"
@@ -50,7 +50,7 @@ var (
 )
 
 // RPCServer - Function used to send/recv envelopes
-type RPCServer func(*sliverpb.Envelope, time.Duration) chan *sliverpb.Envelope
+type RPCServer func(*implantpb.Envelope, time.Duration) chan *implantpb.Envelope
 
 type observer func()
 
@@ -79,7 +79,7 @@ func (s *activeSliver) DisableActiveSliver() {
 
 // Get Sliver by session ID or name
 func getSliver(arg string, rpc RPCServer) *clientpb.Sliver {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgSessions,
 		Data: []byte{},
 	}, defaultTimeout)
@@ -96,7 +96,7 @@ func getSliver(arg string, rpc RPCServer) *clientpb.Sliver {
 
 // SliverSessionsByName - Return all sessions for a Sliver by name
 func SliverSessionsByName(name string, rpc RPCServer) []*clientpb.Sliver {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgSessions,
 		Data: []byte{},
 	}, defaultTimeout)

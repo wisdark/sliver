@@ -3,10 +3,11 @@ package command
 import (
 	"bytes"
 	"fmt"
-	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
 	"strings"
 	"text/tabwriter"
+
+	clientpb "github.com/bishopfox/sliver/protobuf/client"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -14,7 +15,7 @@ import (
 
 func playersCmd(ctx *grumble.Context, rpc RPCServer) {
 
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgPlayers,
 		Data: []byte{},
 	}, defaultTimeout)

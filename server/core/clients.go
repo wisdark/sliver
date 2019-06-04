@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 )
 
 var (
@@ -23,8 +23,8 @@ type Client struct {
 	ID          int
 	Operator    string
 	Certificate *x509.Certificate
-	Send        chan *sliverpb.Envelope
-	Resp        map[uint64]chan *sliverpb.Envelope
+	Send        chan *implantpb.Envelope
+	Resp        map[uint64]chan *implantpb.Envelope
 	mutex       *sync.RWMutex
 }
 
@@ -37,7 +37,7 @@ func (c *Client) ToProtobuf() *clientpb.Client {
 }
 
 // Response - Drop an evelope into a response channel
-func (c *Client) Response(envelope *sliverpb.Envelope) {
+func (c *Client) Response(envelope *implantpb.Envelope) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if resp, ok := c.Resp[envelope.ID]; ok {
@@ -85,7 +85,7 @@ func GetClient(certificate *x509.Certificate) *Client {
 		Operator:    operator,
 		Certificate: certificate,
 		mutex:       &sync.RWMutex{},
-		Send:        make(chan *sliverpb.Envelope),
-		Resp:        map[uint64]chan *sliverpb.Envelope{},
+		Send:        make(chan *implantpb.Envelope),
+		Resp:        map[uint64]chan *implantpb.Envelope{},
 	}
 }

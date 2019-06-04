@@ -8,7 +8,7 @@ import (
 
 	"github.com/bishopfox/sliver/client/spin"
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -38,7 +38,7 @@ func executeShellcode(ctx *grumble.Context, rpc RPCServer) {
 		Data:     shellcodeBin,
 		SliverID: ActiveSliver.Sliver.ID,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgTask,
 		Data: data,
 	}, defaultTimeout)
@@ -75,7 +75,7 @@ func migrate(ctx *grumble.Context, rpc RPCServer) {
 		Config:   config,
 		SliverID: ActiveSliver.Sliver.ID,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgMigrate,
 		Data: data,
 	}, defaultTimeout)
@@ -134,7 +134,7 @@ func executeAssembly(ctx *grumble.Context, rpc RPCServer) {
 
 	ctrl := make(chan bool)
 	go spin.Until("Executing assembly ...", ctrl)
-	data, _ := proto.Marshal(&sliverpb.ExecuteAssemblyReq{
+	data, _ := proto.Marshal(&implantpb.ExecuteAssemblyReq{
 		SliverID:   ActiveSliver.Sliver.ID,
 		Timeout:    int32(ctx.Flags.Int("timeout")),
 		Arguments:  assemblyArgs,
@@ -142,13 +142,13 @@ func executeAssembly(ctx *grumble.Context, rpc RPCServer) {
 		HostingDll: []byte{},
 	})
 
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Data: data,
-		Type: sliverpb.MsgExecuteAssembly,
+		Type: implantpb.MsgExecuteAssembly,
 	}, cmdTimeout)
 	ctrl <- true
 	<-ctrl
-	execResp := &sliverpb.ExecuteAssembly{}
+	execResp := &implantpb.ExecuteAssembly{}
 	proto.Unmarshal(resp.Data, execResp)
 	if execResp.Error != "" {
 		fmt.Printf(Warn+"%s", execResp.Error)

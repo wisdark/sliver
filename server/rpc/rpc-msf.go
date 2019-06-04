@@ -4,7 +4,7 @@ import (
 	"time"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/msf"
 
@@ -40,11 +40,11 @@ func rpcMsf(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, err)
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.Task{
+	data, _ := proto.Marshal(&implantpb.Task{
 		Encoder: "raw",
 		Data:    rawPayload,
 	})
-	data, err = sliver.Request(sliverpb.MsgTask, timeout, data)
+	data, err = sliver.Request(implantpb.MsgTask, timeout, data)
 	resp(data, err)
 }
 
@@ -77,11 +77,11 @@ func rpcMsfInject(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, err)
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.RemoteTask{
+	data, _ := proto.Marshal(&implantpb.RemoteTask{
 		Pid:     msfReq.PID,
 		Encoder: "raw",
 		Data:    rawPayload,
 	})
-	data, err = sliver.Request(sliverpb.MsgRemoteTask, timeout, data)
+	data, err = sliver.Request(implantpb.MsgRemoteTask, timeout, data)
 	resp(data, err)
 }

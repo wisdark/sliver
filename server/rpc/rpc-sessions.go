@@ -1,22 +1,23 @@
 package rpc
 
 import (
-	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
-	"github.com/bishopfox/sliver/server/core"
 	"time"
+
+	clientpb "github.com/bishopfox/sliver/protobuf/client"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
+	"github.com/bishopfox/sliver/server/core"
 
 	"github.com/golang/protobuf/proto"
 )
 
 func rpcKill(data []byte, timeout time.Duration, resp RPCResponse) {
-	killReq := &sliverpb.KillReq{}
+	killReq := &implantpb.KillReq{}
 	err := proto.Unmarshal(data, killReq)
 	if err != nil {
 		resp([]byte{}, err)
 	}
 	sliver := core.Hive.Sliver(killReq.SliverID)
-	data, err = sliver.Request(sliverpb.MsgKill, timeout, data)
+	data, err = sliver.Request(implantpb.MsgKill, timeout, data)
 	core.Hive.RemoveSliver(sliver)
 	resp(data, err)
 }

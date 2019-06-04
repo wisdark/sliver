@@ -5,7 +5,7 @@ import (
 
 	"github.com/bishopfox/sliver/client/spin"
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -51,7 +51,7 @@ func getsystem(ctx *grumble.Context, rpc RPCServer) {
 		SliverID: ActiveSliver.Sliver.ID,
 		Config:   config,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgGetSystemReq,
 		Data: data,
 	}, defaultTimeout)
@@ -61,7 +61,7 @@ func getsystem(ctx *grumble.Context, rpc RPCServer) {
 		fmt.Printf(Warn+"Error: %s", resp.Err)
 		return
 	}
-	gsResp := &sliverpb.GetSystem{}
+	gsResp := &implantpb.GetSystem{}
 	err := proto.Unmarshal(resp.Data, gsResp)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -81,9 +81,9 @@ func elevate(ctx *grumble.Context, rpc RPCServer) {
 	}
 	ctrl := make(chan bool)
 	go spin.Until("Starting a new sliver session...", ctrl)
-	data, _ := proto.Marshal(&sliverpb.ElevateReq{SliverID: ActiveSliver.Sliver.ID})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgElevate,
+	data, _ := proto.Marshal(&implantpb.ElevateReq{SliverID: ActiveSliver.Sliver.ID})
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgElevate,
 		Data: data,
 	}, defaultTimeout)
 	ctrl <- true
@@ -92,7 +92,7 @@ func elevate(ctx *grumble.Context, rpc RPCServer) {
 		fmt.Printf(Warn+"Error: %s", resp.Err)
 		return
 	}
-	elevate := &sliverpb.Elevate{}
+	elevate := &implantpb.Elevate{}
 	err := proto.Unmarshal(resp.Data, elevate)
 	if err != nil {
 		fmt.Printf(Warn+"Unmarshaling envelope error: %v\n", err)
@@ -106,23 +106,23 @@ func elevate(ctx *grumble.Context, rpc RPCServer) {
 }
 
 // Utility functions
-func runProcessAsUser(username, process, arguments string, rpc RPCServer) (impersonate *sliverpb.Impersonate, err error) {
-	data, _ := proto.Marshal(&sliverpb.ImpersonateReq{
+func runProcessAsUser(username, process, arguments string, rpc RPCServer) (impersonate *implantpb.Impersonate, err error) {
+	data, _ := proto.Marshal(&implantpb.ImpersonateReq{
 		Username: username,
 		Process:  process,
 		Args:     arguments,
 		SliverID: ActiveSliver.Sliver.ID,
 	})
 
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgImpersonate,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgImpersonate,
 		Data: data,
 	}, defaultTimeout)
 	if resp.Err != "" {
 		err = fmt.Errorf(Warn+"Error: %s", resp.Err)
 		return
 	}
-	impersonate = &sliverpb.Impersonate{}
+	impersonate = &implantpb.Impersonate{}
 	err = proto.Unmarshal(resp.Data, impersonate)
 	if err != nil {
 		err = fmt.Errorf(Warn+"Unmarshaling envelope error: %v\n", err)

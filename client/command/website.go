@@ -15,7 +15,7 @@ import (
 	"github.com/AlecAivazis/survey"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/golang/protobuf/proto"
 
 	"github.com/desertbit/grumble"
@@ -48,7 +48,7 @@ func websites(ctx *grumble.Context, rpc RPCServer) {
 }
 
 func listWebsites(ctx *grumble.Context, rpc RPCServer) {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgWebsiteList,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -72,7 +72,7 @@ func listWebsites(ctx *grumble.Context, rpc RPCServer) {
 }
 
 func listWebsiteContent(ctx *grumble.Context, rpc RPCServer) {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgWebsiteList,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -126,7 +126,7 @@ func addWebsiteContent(ctx *grumble.Context, rpc RPCServer) {
 		fmt.Printf(Warn+"Failed to marshal data %s\n", err)
 		return
 	}
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgWebsiteAddContent,
 		Data: data,
 	}, defaultTimeout)
@@ -148,7 +148,7 @@ func removeWebsiteContent(ctx *grumble.Context, rpc RPCServer) {
 	rmWeb.Content[webpath] = &clientpb.WebContent{}
 
 	data, _ := proto.Marshal(rmWeb)
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgWebsiteRemoveContent,
 		Data: data,
 	}, defaultTimeout)

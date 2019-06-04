@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/golang/protobuf/proto"
 )
@@ -44,16 +44,16 @@ func (t *tunnels) CloseTunnel(tunnelID uint64, reason string) bool {
 	defer t.mutex.Unlock()
 	tunnel := (*t.tunnels)[tunnelID]
 	if tunnel != nil {
-		tunnelClose, _ := proto.Marshal(&sliverpb.TunnelClose{
+		tunnelClose, _ := proto.Marshal(&implantpb.TunnelClose{
 			TunnelID: tunnelID,
 			Err:      reason,
 		})
-		tunnel.Client.Send <- &sliverpb.Envelope{
-			Type: sliverpb.MsgTunnelClose,
+		tunnel.Client.Send <- &implantpb.Envelope{
+			Type: implantpb.MsgTunnelClose,
 			Data: tunnelClose,
 		}
-		tunnel.Sliver.Send <- &sliverpb.Envelope{
-			Type: sliverpb.MsgTunnelClose,
+		tunnel.Sliver.Send <- &implantpb.Envelope{
+			Type: implantpb.MsgTunnelClose,
 			Data: tunnelClose,
 		}
 		delete(*t.tunnels, tunnelID)

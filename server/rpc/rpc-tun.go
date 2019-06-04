@@ -1,11 +1,12 @@
 package rpc
 
 import (
-	"github.com/bishopfox/sliver/server/core"
 	"time"
 
+	"github.com/bishopfox/sliver/server/core"
+
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/golang/protobuf/proto"
 )
@@ -29,11 +30,11 @@ func tunnelCreate(client *core.Client, req []byte, resp RPCResponse) {
 }
 
 func tunnelData(client *core.Client, req []byte, _ RPCResponse) {
-	tunnelData := &sliverpb.TunnelData{}
+	tunnelData := &implantpb.TunnelData{}
 	proto.Unmarshal(req, tunnelData)
 	tunnel := core.Tunnels.Tunnel(tunnelData.TunnelID)
 	if tunnel != nil && client.ID == tunnel.Client.ID {
-		tunnel.Sliver.Request(sliverpb.MsgTunnelData, tunDefaultTimeout, req)
+		tunnel.Sliver.Request(implantpb.MsgTunnelData, tunDefaultTimeout, req)
 	} else {
 		rpcLog.Warnf("Data sent on nil tunnel %d", tunnelData.TunnelID)
 	}
@@ -47,7 +48,7 @@ func tunnelClose(client *core.Client, req []byte, resp RPCResponse) {
 
 	if tunnel != nil && client.ID == tunnel.Client.ID {
 		closed := core.Tunnels.CloseTunnel(tunCloseReq.TunnelID, "Client exit")
-		closeResp := &sliverpb.TunnelClose{
+		closeResp := &implantpb.TunnelClose{
 			TunnelID: tunCloseReq.TunnelID,
 		}
 		if !closed {

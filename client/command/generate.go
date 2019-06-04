@@ -16,7 +16,7 @@ import (
 	consts "github.com/bishopfox/sliver/client/constants"
 	"github.com/bishopfox/sliver/client/spin"
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -47,7 +47,7 @@ func regenerate(ctx *grumble.Context, rpc RPCServer) {
 	regenerateReq, _ := proto.Marshal(&clientpb.Regenerate{
 		SliverName: ctx.Args[0],
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgRegenerate,
 		Data: regenerateReq,
 	}, defaultTimeout)
@@ -296,7 +296,7 @@ func compile(config *clientpb.SliverConfig, save string, rpc RPCServer) {
 	go spin.Until("Compiling, please wait ...", ctrl)
 
 	generateReq, _ := proto.Marshal(&clientpb.GenerateReq{Config: config})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgGenerate,
 		Data: generateReq,
 	}, 45*time.Minute)
@@ -411,7 +411,7 @@ func newProfile(ctx *grumble.Context, rpc RPCServer) {
 		Config: config,
 	})
 
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgNewProfile,
 		Data: data,
 	}, defaultTimeout)
@@ -423,7 +423,7 @@ func newProfile(ctx *grumble.Context, rpc RPCServer) {
 }
 
 func getSliverProfiles(rpc RPCServer) *map[string]*clientpb.Profile {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgProfiles,
 	}, defaultTimeout)
 	if resp.Err != "" {
@@ -446,7 +446,7 @@ func getSliverProfiles(rpc RPCServer) *map[string]*clientpb.Profile {
 }
 
 func canaries(ctx *grumble.Context, rpc RPCServer) {
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgListCanaries,
 	}, defaultTimeout)
 	if resp.Err != "" {

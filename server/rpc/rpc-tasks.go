@@ -5,7 +5,7 @@ import (
 	"time"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/assets"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/generate"
@@ -21,11 +21,11 @@ func rpcLocalTask(req []byte, timeout time.Duration, resp RPCResponse) {
 		return
 	}
 	sliver := core.Hive.Sliver(taskReq.SliverID)
-	data, _ := proto.Marshal(&sliverpb.Task{
+	data, _ := proto.Marshal(&implantpb.Task{
 		Encoder: "raw",
 		Data:    taskReq.Data,
 	})
-	data, err = sliver.Request(sliverpb.MsgTask, timeout, data)
+	data, err = sliver.Request(implantpb.MsgTask, timeout, data)
 	resp(data, err)
 }
 
@@ -48,17 +48,17 @@ func rpcMigrate(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, err)
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.MigrateReq{
+	data, _ := proto.Marshal(&implantpb.MigrateReq{
 		SliverID:  migrateReq.SliverID,
 		Shellcode: shellcode,
 		Pid:       migrateReq.Pid,
 	})
-	data, err = sliver.Request(sliverpb.MsgMigrateReq, timeout, data)
+	data, err = sliver.Request(implantpb.MsgMigrateReq, timeout, data)
 	resp(data, err)
 }
 
 func rpcExecuteAssembly(req []byte, timeout time.Duration, resp RPCResponse) {
-	execReq := &sliverpb.ExecuteAssemblyReq{}
+	execReq := &implantpb.ExecuteAssemblyReq{}
 	err := proto.Unmarshal(req, execReq)
 	if err != nil {
 		resp([]byte{}, err)
@@ -75,7 +75,7 @@ func rpcExecuteAssembly(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, err)
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.ExecuteAssemblyReq{
+	data, _ := proto.Marshal(&implantpb.ExecuteAssemblyReq{
 		Assembly:   execReq.Assembly,
 		HostingDll: hostingDllBytes,
 		Arguments:  execReq.Arguments,
@@ -83,7 +83,7 @@ func rpcExecuteAssembly(req []byte, timeout time.Duration, resp RPCResponse) {
 		SliverID:   execReq.SliverID,
 	})
 
-	data, err = sliver.Request(sliverpb.MsgExecuteAssemblyReq, timeout, data)
+	data, err = sliver.Request(implantpb.MsgExecuteAssemblyReq, timeout, data)
 	resp(data, err)
 
 }

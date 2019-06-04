@@ -3,20 +3,20 @@ package rpc
 import (
 	"time"
 
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/core"
 
 	"github.com/golang/protobuf/proto"
 )
 
 func rpcShell(req []byte, timeout time.Duration, resp RPCResponse) {
-	shellReq := &sliverpb.ShellReq{}
+	shellReq := &implantpb.ShellReq{}
 	proto.Unmarshal(req, shellReq)
 
 	sliver := core.Hive.Sliver(shellReq.SliverID)
 	tunnel := core.Tunnels.Tunnel(shellReq.TunnelID)
 
-	startShellReq, err := proto.Marshal(&sliverpb.ShellReq{
+	startShellReq, err := proto.Marshal(&implantpb.ShellReq{
 		EnablePTY: shellReq.EnablePTY,
 		TunnelID:  tunnel.ID,
 	})
@@ -25,7 +25,7 @@ func rpcShell(req []byte, timeout time.Duration, resp RPCResponse) {
 		return
 	}
 	rpcLog.Infof("Requesting Sliver %d to start shell", sliver.ID)
-	data, err := sliver.Request(sliverpb.MsgShellReq, timeout, startShellReq)
+	data, err := sliver.Request(implantpb.MsgShellReq, timeout, startShellReq)
 	rpcLog.Infof("Sliver %d responded to shell start request", sliver.ID)
 	resp(data, err)
 }

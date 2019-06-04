@@ -3,11 +3,12 @@ package command
 import (
 	"bytes"
 	"fmt"
-	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	clientpb "github.com/bishopfox/sliver/protobuf/client"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/desertbit/grumble"
 	"github.com/golang/protobuf/proto"
@@ -24,7 +25,7 @@ func sessions(ctx *grumble.Context, rpc RPCServer) {
 			fmt.Printf(Warn+"Invalid sliver name or session number '%s'\n", ctx.Args[0])
 		}
 	} else {
-		resp := <-rpc(&sliverpb.Envelope{
+		resp := <-rpc(&implantpb.Envelope{
 			Type: clientpb.MsgSessions,
 			Data: []byte{},
 		}, defaultTimeout)
@@ -136,12 +137,12 @@ func kill(ctx *grumble.Context, rpc RPCServer) {
 	force := ctx.Flags.Bool("force")
 
 	sliver := ActiveSliver.Sliver
-	data, _ := proto.Marshal(&sliverpb.KillReq{
+	data, _ := proto.Marshal(&implantpb.KillReq{
 		SliverID: sliver.ID,
 		Force:    force,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
-		Type: sliverpb.MsgKill,
+	resp := <-rpc(&implantpb.Envelope{
+		Type: implantpb.MsgKill,
 		Data: data,
 	}, 5)
 

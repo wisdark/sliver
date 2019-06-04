@@ -8,7 +8,7 @@ import (
 
 	"github.com/bishopfox/sliver/client/assets"
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"sync"
 	"time"
@@ -41,7 +41,7 @@ func (t *tunnels) bindTunnel(SliverID uint32, TunnelID uint64) *tunnel {
 }
 
 // RecvTunnelData - Routes a TunnelData protobuf msg to the correct tunnel object
-func (t *tunnels) RecvTunnelData(tunnelData *sliverpb.TunnelData) {
+func (t *tunnels) RecvTunnelData(tunnelData *implantpb.TunnelData) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	tunnel := (*t.tunnels)[tunnelData.TunnelID]
@@ -69,23 +69,23 @@ type tunnel struct {
 
 func (t *tunnel) Send(data []byte) {
 	log.Printf("Sending %d bytes on tunnel %d (sliver %d)", len(data), t.ID, t.SliverID)
-	tunnelData := &sliverpb.TunnelData{
+	tunnelData := &implantpb.TunnelData{
 		SliverID: t.SliverID,
 		TunnelID: t.ID,
 		Data:     data,
 	}
 	rawTunnelData, _ := proto.Marshal(tunnelData)
-	t.server.Send <- &sliverpb.Envelope{
-		Type: sliverpb.MsgTunnelData,
+	t.server.Send <- &implantpb.Envelope{
+		Type: implantpb.MsgTunnelData,
 		Data: rawTunnelData,
 	}
 }
 
 // SliverServer - Server info
 type SliverServer struct {
-	Send      chan *sliverpb.Envelope
-	recv      chan *sliverpb.Envelope
-	responses *map[uint64]chan *sliverpb.Envelope
+	Send      chan *implantpb.Envelope
+	recv      chan *implantpb.Envelope
+	responses *map[uint64]chan *implantpb.Envelope
 	mutex     *sync.RWMutex
 	Config    *assets.ClientConfig
 	Events    chan *clientpb.Event
@@ -97,7 +97,7 @@ func (ss *SliverServer) CreateTunnel(sliverID uint32, defaultTimeout time.Durati
 	tunReq := &clientpb.TunnelCreateReq{SliverID: sliverID}
 	tunReqData, _ := proto.Marshal(tunReq)
 
-	tunResp := <-ss.RPC(&sliverpb.Envelope{
+	tunResp := <-ss.RPC(&implantpb.Envelope{
 		Type: clientpb.MsgTunnelCreate,
 		Data: tunReqData,
 	}, defaultTimeout)
@@ -138,8 +138,8 @@ func (ss *SliverServer) ResponseMapper() {
 				// log.Printf("[client] Routing event message")
 				ss.Events <- event
 
-			case sliverpb.MsgTunnelData:
-				tunnelData := &sliverpb.TunnelData{}
+			case implantpb.MsgTunnelData:
+				tunnelData := &implantpb.TunnelData{}
 				err := proto.Unmarshal(envelope.Data, tunnelData)
 				if err != nil {
 					log.Printf("Failed to decode tunnel data envelope")
@@ -148,8 +148,8 @@ func (ss *SliverServer) ResponseMapper() {
 				// log.Printf("[client] Routing tunnel data with id %d", tunnelData.TunnelID)
 				ss.Tunnels.RecvTunnelData(tunnelData)
 
-			case sliverpb.MsgTunnelClose:
-				tunnelClose := &sliverpb.TunnelClose{}
+			case implantpb.MsgTunnelClose:
+				tunnelClose := &implantpb.TunnelClose{}
 				err := proto.Unmarshal(envelope.Data, tunnelClose)
 				if err != nil {
 					log.Printf("Failed to decode tunnel data envelope")
@@ -163,28 +163,28 @@ func (ss *SliverServer) ResponseMapper() {
 }
 
 // RPC - Send a request envelope and wait for a response (blocking)
-func (ss *SliverServer) RPC(envelope *sliverpb.Envelope, timeout time.Duration) chan *sliverpb.Envelope {
+func (ss *SliverServer) RPC(envelope *implantpb.Envelope, timeout time.Duration) chan *implantpb.Envelope {
 	reqID := EnvelopeID()
 	envelope.ID = reqID
 	envelope.Timeout = timeout.Nanoseconds()
-	resp := make(chan *sliverpb.Envelope)
+	resp := make(chan *implantpb.Envelope)
 	ss.AddRespListener(reqID, resp)
 	ss.Send <- envelope
-	respCh := make(chan *sliverpb.Envelope)
+	respCh := make(chan *implantpb.Envelope)
 	go func() {
 		defer ss.RemoveRespListener(reqID)
 		select {
 		case respEnvelope := <-resp:
 			respCh <- respEnvelope
 		case <-time.After(timeout + time.Second):
-			respCh <- &sliverpb.Envelope{Err: "Timeout"}
+			respCh <- &implantpb.Envelope{Err: "Timeout"}
 		}
 	}()
 	return respCh
 }
 
 // AddRespListener - Add a response listener
-func (ss *SliverServer) AddRespListener(envelopeID uint64, resp chan *sliverpb.Envelope) {
+func (ss *SliverServer) AddRespListener(envelopeID uint64, resp chan *implantpb.Envelope) {
 	ss.mutex.Lock()
 	defer ss.mutex.Unlock()
 	(*ss.responses)[envelopeID] = resp
@@ -199,11 +199,11 @@ func (ss *SliverServer) RemoveRespListener(envelopeID uint64) {
 }
 
 // BindSliverServer - Bind send/recv channels to a server
-func BindSliverServer(send, recv chan *sliverpb.Envelope) *SliverServer {
+func BindSliverServer(send, recv chan *implantpb.Envelope) *SliverServer {
 	server := &SliverServer{
 		Send:      send,
 		recv:      recv,
-		responses: &map[uint64]chan *sliverpb.Envelope{},
+		responses: &map[uint64]chan *implantpb.Envelope{},
 		mutex:     &sync.RWMutex{},
 		Events:    make(chan *clientpb.Event, 1),
 	}

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/log"
 	"github.com/bishopfox/sliver/server/rpc"
@@ -17,7 +17,7 @@ import (
 // LocalClientConnect - Handles local connections to the server console
 // keep in mind the arguments to this function are in the context of the client
 // so send = "send to server" and recv = "recv from server"
-func LocalClientConnect(send, recv chan *sliverpb.Envelope) {
+func LocalClientConnect(send, recv chan *implantpb.Envelope) {
 	client := core.GetClient(nil)
 	client.Send = recv // Client's recv channel
 	core.Clients.AddClient(client)
@@ -33,7 +33,7 @@ func LocalClientConnect(send, recv chan *sliverpb.Envelope) {
 					if err != nil {
 						errStr = fmt.Sprintf("%v", err)
 					}
-					client.Send <- &sliverpb.Envelope{
+					client.Send <- &implantpb.Envelope{
 						ID:   envelope.ID,
 						Data: data,
 						Err:  errStr,
@@ -49,14 +49,14 @@ func LocalClientConnect(send, recv chan *sliverpb.Envelope) {
 					if err != nil {
 						errStr = fmt.Sprintf("%v", err)
 					}
-					client.Send <- &sliverpb.Envelope{
+					client.Send <- &implantpb.Envelope{
 						ID:   envelope.ID,
 						Data: data,
 						Err:  errStr,
 					}
 				})
 			} else {
-				client.Send <- &sliverpb.Envelope{
+				client.Send <- &implantpb.Envelope{
 					ID:   envelope.ID,
 					Data: []byte{},
 					Err:  "Unknown rpc command",
@@ -89,7 +89,7 @@ func localEventLoop(client *core.Client) {
 		}
 
 		data, _ := proto.Marshal(pbEvent)
-		client.Send <- &sliverpb.Envelope{
+		client.Send <- &implantpb.Envelope{
 			Type: clientpb.MsgEvent,
 			Data: data,
 		}

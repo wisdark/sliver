@@ -5,7 +5,7 @@ import (
 	"time"
 
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/generate"
 
@@ -13,7 +13,7 @@ import (
 )
 
 func rpcImpersonate(req []byte, timeout time.Duration, resp RPCResponse) {
-	impersonateReq := &sliverpb.ImpersonateReq{}
+	impersonateReq := &implantpb.ImpersonateReq{}
 	err := proto.Unmarshal(req, impersonateReq)
 	if err != nil {
 		resp([]byte{}, err)
@@ -24,13 +24,13 @@ func rpcImpersonate(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, fmt.Errorf("Could not find sliver"))
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.ImpersonateReq{
+	data, _ := proto.Marshal(&implantpb.ImpersonateReq{
 		Process:  impersonateReq.Process,
 		Username: impersonateReq.Username,
 		Args:     impersonateReq.Args,
 	})
 
-	data, err = sliver.Request(sliverpb.MsgImpersonateReq, timeout, data)
+	data, err = sliver.Request(implantpb.MsgImpersonateReq, timeout, data)
 	resp(data, err)
 }
 
@@ -58,18 +58,18 @@ func rpcGetSystem(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, err)
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.GetSystemReq{
+	data, _ := proto.Marshal(&implantpb.GetSystemReq{
 		Data:     shellcode,
 		SliverID: gsReq.SliverID,
 	})
 
-	data, err = sliver.Request(sliverpb.MsgGetSystemReq, timeout, data)
+	data, err = sliver.Request(implantpb.MsgGetSystemReq, timeout, data)
 	resp(data, err)
 
 }
 
 func rpcElevate(req []byte, timeout time.Duration, resp RPCResponse) {
-	elevateReq := &sliverpb.ElevateReq{}
+	elevateReq := &implantpb.ElevateReq{}
 	err := proto.Unmarshal(req, elevateReq)
 	if err != nil {
 		resp([]byte{}, err)
@@ -80,9 +80,9 @@ func rpcElevate(req []byte, timeout time.Duration, resp RPCResponse) {
 		resp([]byte{}, fmt.Errorf("Could not find sliver"))
 		return
 	}
-	data, _ := proto.Marshal(&sliverpb.ElevateReq{})
+	data, _ := proto.Marshal(&implantpb.ElevateReq{})
 
-	data, err = sliver.Request(sliverpb.MsgElevateReq, timeout, data)
+	data, err = sliver.Request(implantpb.MsgElevateReq, timeout, data)
 	resp(data, err)
 
 }

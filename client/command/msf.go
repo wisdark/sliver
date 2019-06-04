@@ -5,7 +5,7 @@ import (
 
 	consts "github.com/bishopfox/sliver/client/constants"
 	clientpb "github.com/bishopfox/sliver/protobuf/client"
-	sliverpb "github.com/bishopfox/sliver/protobuf/sliver"
+	implantpb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/bishopfox/sliver/client/spin"
 
@@ -44,7 +44,7 @@ func msf(ctx *grumble.Context, rpc RPCServer) {
 		Iterations: int32(iterations),
 		SliverID:   ActiveSliver.Sliver.ID,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgMsf,
 		Data: data,
 	}, defaultTimeout)
@@ -95,7 +95,7 @@ func msfInject(ctx *grumble.Context, rpc RPCServer) {
 		PID:        int32(pid),
 		SliverID:   ActiveSliver.Sliver.ID,
 	})
-	resp := <-rpc(&sliverpb.Envelope{
+	resp := <-rpc(&implantpb.Envelope{
 		Type: clientpb.MsgMsfInject,
 		Data: data,
 	}, defaultTimeout)
