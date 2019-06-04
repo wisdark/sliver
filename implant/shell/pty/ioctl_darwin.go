@@ -1,4 +1,4 @@
-// +build darwin dragonfly freebsd netbsd openbsd
+// +build darwin
 
 package pty
 

