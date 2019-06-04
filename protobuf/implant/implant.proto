@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sliverpb;
+package implantpb;
 
 message Envelope {
   uint32 Type = 1; // Message type

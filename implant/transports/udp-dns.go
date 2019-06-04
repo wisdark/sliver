@@ -21,13 +21,14 @@ import (
 
 	insecureRand "math/rand"
 	"net"
-	pb "github.com/bishopfox/sliver/protobuf/sliver"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	consts "github.com/bishopfox/sliver/sliver/constants"
+	pb "github.com/bishopfox/sliver/protobuf/implant"
+
+	consts "github.com/bishopfox/sliver/implant/constants"
 
 	"github.com/golang/protobuf/proto"
 )

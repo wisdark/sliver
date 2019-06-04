@@ -403,8 +403,7 @@ func renderSliverGoCode(config *SliverConfig, goConfig *gogo.GoConfig) (string, 
 			fileName = fmt.Sprintf("s%d%s", index, suffix)
 		}
 		if dirName != "." {
-			// Add an extra "sliver" dir
-			dirPath := path.Join(sliverPkgDir, "sliver", dirName)
+			dirPath := path.Join(sliverPkgDir, "implant", dirName)
 			if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 				buildLog.Infof("[mkdir] %#v", dirPath)
 				os.MkdirAll(dirPath, os.ModePerm)

@@ -2,13 +2,13 @@ package handlers
 
 import ( // {{if .Debug}}
 	// {{else}}{{end}}
-	pb "github.com/bishopfox/sliver/protobuf/sliver"
+	pb "github.com/bishopfox/sliver/protobuf/implant"
 )
 
 var (
 	linuxHandlers = map[uint32]RPCHandler{
-		pb.MsgPsReq: psHandler,
-		pb.MsgPing:  pingHandler,
+		pb.MsgPsReq:       psHandler,
+		pb.MsgPing:        pingHandler,
 		pb.MsgLsReq:       dirListHandler,
 		pb.MsgDownloadReq: downloadHandler,
 		pb.MsgUploadReq:   uploadHandler,

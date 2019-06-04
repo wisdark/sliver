@@ -19,11 +19,11 @@ import (
 
 	"log"
 
-	pb "github.com/bishopfox/sliver/protobuf/sliver"
-	consts "github.com/bishopfox/sliver/sliver/constants"
-	"github.com/bishopfox/sliver/sliver/handlers"
-	"github.com/bishopfox/sliver/sliver/limits"
-	"github.com/bishopfox/sliver/sliver/transports"
+	consts "github.com/bishopfox/sliver/implant/constants"
+	"github.com/bishopfox/sliver/implant/handlers"
+	"github.com/bishopfox/sliver/implant/limits"
+	"github.com/bishopfox/sliver/implant/transports"
+	pb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/golang/protobuf/proto"
 )

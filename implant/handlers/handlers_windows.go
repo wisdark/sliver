@@ -5,9 +5,9 @@ import (
 	"log"
 	// {{else}}{{end}}
 
-	pb "github.com/bishopfox/sliver/protobuf/sliver"
-	"github.com/bishopfox/sliver/sliver/priv"
-	"github.com/bishopfox/sliver/sliver/taskrunner"
+	"github.com/bishopfox/sliver/implant/priv"
+	"github.com/bishopfox/sliver/implant/taskrunner"
+	pb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/golang/protobuf/proto"
 )

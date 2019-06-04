@@ -14,7 +14,8 @@ import (
 	// {{end}}
 
 	"os"
-	pb "github.com/bishopfox/sliver/protobuf/sliver"
+
+	pb "github.com/bishopfox/sliver/protobuf/implant"
 
 	"github.com/golang/protobuf/proto"
 )
