@@ -315,6 +315,7 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.SliverConfig {
 		GOARCH:           arch,
 		Debug:            ctx.Flags.Bool("debug"),
 		ObfuscateSymbols: symbolObfuscation,
+		ObfuscateAPT:     int32(ctx.Flags.Int("apt")),
 		C2:               c2s,
 		CanaryDomains:    canaryDomains,
 
