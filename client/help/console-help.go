@@ -59,6 +59,7 @@ var (
 		consts.ExecuteAssemblyStr:  executeAssemblyHelp,
 		consts.ExecuteShellcodeStr: executeShellcodeHelp,
 		consts.MigrateStr:          migrateHelp,
+		consts.SideloadStr:         sideloadHelp,
 
 		consts.WebsitesStr: websitesHelp,
 	}
@@ -222,7 +223,7 @@ c2 message round trip to ensure the remote Sliver is still responding to command
 [[.Bold]]About:[[.Normal]] Executes the given shellcode in the Sliver process.
 
 [[.Bold]][[.Underline]]++ Shellcode ++[[.Normal]]
-Shellcode files should be binary encoded, you can generate Sliver shellcode files with the generage command:
+Shellcode files should be binary encoded, you can generate Sliver shellcode files with the generate command:
 	generate --format shellcode
 `
 
@@ -243,6 +244,17 @@ Operations are used to manage the content of each website and go at the end of t
 
 Add content to a website:
 	websites --website blog --web-path / --content ./index.html add
+`
+	sideloadHelp = `[[.Bold]]Command:[[.Normal]] sideload <options> <filepath to DLL> <entrypoint to execute> [entrypoint arguments]
+[[.Bold]]About:[[.Normal]] Load and execute a DLL in memory in a remote process.
+
+[[.Bold]]--process[[.Normal]] - Process to inject into.
+`
+	spawnDllHelp = `[[.Bold]]Command:[[.Normal]] spawndll <options> <filepath to DLL> [entrypoint arguments]
+[[.Bold]]About:[[.Normal]] Load and execute a Reflective DLL in memory in a remote process.
+
+[[.Bold]]--process[[.Normal]] - Process to inject into.
+[[.Bold]]--export[[.Normal]] - Name of the export to call (default: ReflectiveLoader)
 `
 )
 

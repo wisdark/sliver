@@ -88,16 +88,19 @@ const (
 	GetGIDStr = "getgid"
 	WhoamiStr = "whoami"
 
-	ShellStr = "shell"
+	ShellStr   = "shell"
+	ExecuteStr = "execute"
 
-	LsStr               = "ls"
-	RmStr               = "rm"
-	MkdirStr            = "mkdir"
-	CdStr               = "cd"
-	PwdStr              = "pwd"
-	CatStr              = "cat"
-	DownloadStr         = "download"
-	UploadStr           = "upload"
+	LsStr       = "ls"
+	RmStr       = "rm"
+	MkdirStr    = "mkdir"
+	CdStr       = "cd"
+	PwdStr      = "pwd"
+	CatStr      = "cat"
+	DownloadStr = "download"
+	UploadStr   = "upload"
+	IfconfigStr = "ifconfig"
+
 	ProcdumpStr         = "procdump"
 	ImpersonateStr      = "impersonate"
 	ElevateStr          = "elevate"
@@ -105,6 +108,8 @@ const (
 	ExecuteAssemblyStr  = "execute-assembly"
 	ExecuteShellcodeStr = "execute-shellcode"
 	MigrateStr          = "migrate"
+	SideloadStr         = "sideload"
+	SpawnDllStr         = "spawndll"
 
 	WebsitesStr = "websites"
 

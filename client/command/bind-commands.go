@@ -246,6 +246,7 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 		LongHelp: help.GetHelpFor(consts.ShellStr),
 		Flags: func(f *grumble.Flags) {
 			f.Bool("y", "no-pty", false, "disable use of pty on macos/linux")
+			f.String("s", "shell-path", "", "path to shell interpreter")
 		},
 		Run: func(ctx *grumble.Context) error {
 			fmt.Println()
@@ -257,6 +258,24 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 	})
 
 	app.AddCommand(&grumble.Command{
+		Name:     consts.ExecuteStr,
+		Help:     "Execute a program on the remote system",
+		LongHelp: help.GetHelpFor(consts.ExecuteStr),
+		Flags: func(f *grumble.Flags) {
+			f.String("a", "args", "", "command arguments")
+			f.Bool("o", "output", false, "print the command output")
+		},
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			execute(ctx, server.RPC)
+			fmt.Println()
+			return nil
+		},
+		AllowArgs: true,
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	app.AddCommand(&grumble.Command{
 		Name:     consts.GenerateStr,
 		Help:     "Generate a sliver binary",
 		LongHelp: help.GetHelpFor(consts.GenerateStr),
@@ -264,7 +283,7 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 			f.String("o", "os", "windows", "operating system")
 			f.String("a", "arch", "amd64", "cpu architecture")
 			f.Bool("d", "debug", false, "enable debug features")
-			f.Bool("s", "skip-symbols", false, "skip symbol obfuscation")
+			f.Bool("b", "skip-symbols", false, "skip symbol obfuscation")
 
 			f.String("c", "canary", "", "canary domain(s)")
 
@@ -689,6 +708,19 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 	})
 
 	app.AddCommand(&grumble.Command{
+		Name:     consts.IfconfigStr,
+		Help:     "View network interface configurations",
+		LongHelp: help.GetHelpFor(consts.IfconfigStr),
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			ifconfig(ctx, server.RPC)
+			fmt.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	app.AddCommand(&grumble.Command{
 		Name:     consts.ProcdumpStr,
 		Help:     "Dump process memory",
 		LongHelp: help.GetHelpFor(consts.ProcdumpStr),
@@ -782,6 +814,10 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 			fmt.Println()
 			return nil
 		},
+		Flags: func(f *grumble.Flags) {
+			f.Bool("r", "rwx-pages", false, "Use RWX permissions for memory pages")
+			f.Uint("p", "pid", 0, "Pid of process to inject into (0 means injection into ourselves)")
+		},
 		HelpGroup: consts.SliverHelpGroup,
 	})
 
@@ -820,4 +856,40 @@ func BindCommands(app *grumble.App, server *core.SliverServer) {
 		HelpGroup: consts.GenericHelpGroup,
 	})
 
+	app.AddCommand(&grumble.Command{
+		Name:     consts.SideloadStr,
+		Help:     "Load and execute a DLL in a remote process",
+		LongHelp: help.GetHelpFor(consts.SideloadStr),
+		Flags: func(f *grumble.Flags) {
+			f.String("p", "process", `c:\windows\system32\notepad.exe`, "Path to process to host the shellcode")
+			f.Int("t", "timeout", 10, "command timeout in seconds")
+		},
+		AllowArgs: true,
+		HelpGroup: consts.SliverWinHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			sideloadDll(ctx, server.RPC)
+			fmt.Println()
+			return nil
+		},
+	})
+
+	app.AddCommand(&grumble.Command{
+		Name:     consts.SpawnDllStr,
+		Help:     "Load and execute a Reflective DLL in a remote process",
+		LongHelp: help.GetHelpFor(consts.SpawnDllStr),
+		Flags: func(f *grumble.Flags) {
+			f.String("p", "process", `c:\windows\system32\notepad.exe`, "Path to process to host the shellcode")
+			f.String("e", "export", "ReflectiveLoader", "Entrypoint of the Reflective DLL")
+			f.Int("t", "timeout", 10, "command timeout in seconds")
+		},
+		AllowArgs: true,
+		HelpGroup: consts.SliverWinHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			fmt.Println()
+			spawnDll(ctx, server.RPC)
+			fmt.Println()
+			return nil
+		},
+	})
 }

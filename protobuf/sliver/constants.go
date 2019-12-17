@@ -109,4 +109,18 @@ const (
 	MsgExecuteAssembly
 	// MsgMigrateReq - Spawn a new sliver in a designated process
 	MsgMigrateReq
+
+	// MsgSideloadReq - request to sideload a binary
+	MsgSideloadReq
+	// MsgSideload - output of the binary
+	MsgSideload
+	// MsgSpawnDllReq - Reflective DLL injection request
+	MsgSpawnDllReq
+	// MsgSpawnDll - Reflective DLL injection output
+	MsgSpawnDll
+	// MsgIfconfigReq - Ifconfig (network interface config) request
+	MsgIfconfigReq
+
+	// MsgExecuteReq - Execute a command on the remote system
+	MsgExecuteReq
 )

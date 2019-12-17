@@ -35,6 +35,7 @@ message Sliver {
   string Filename = 12; // Argv[0]
   string LastCheckin = 13;
   string ActiveC2 = 14;
+  string Version = 15;
 }
 
 message SliverC2 {
@@ -188,6 +189,8 @@ message MSFInjectReq {
 
 message TaskReq {
   bytes Data = 1;
+  bool RwxPages = 2;
+  uint32 Pid = 3;
   uint32 SliverID = 9;
 }
 
@@ -224,6 +227,14 @@ message Egg {
   bytes Data = 1;
   string Filename = 2;
   int32 JobID = 3;
+}
+
+message SideloadReq {
+  bytes Data = 1;
+  string ProcName = 2;
+  string Args = 3;
+  string EntryPoint = 4;
+  uint32 SliverID = 9;
 }
 
 // [ Tunnels ] ----------------------------------------

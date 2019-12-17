@@ -66,16 +66,17 @@ var (
 
 		clientpb.MsgGetSystemReq: rpcGetSystem,
 
-		clientpb.MsgEggReq: rpcEgg,
+		clientpb.MsgEggReq:             rpcEgg,
+		clientpb.MsgExecuteAssemblyReq: rpcExecuteAssembly,
 
 		// "Req"s directly map to responses
 		sliverpb.MsgPsReq:          rpcPs,
 		sliverpb.MsgKill:           rpcKill,
 		sliverpb.MsgProcessDumpReq: rpcProcdump,
+		sliverpb.MsgSpawnDllReq:    rpcSpawnDll,
 
-		sliverpb.MsgElevate:         rpcElevate,
-		sliverpb.MsgImpersonate:     rpcImpersonate,
-		sliverpb.MsgExecuteAssembly: rpcExecuteAssembly,
+		sliverpb.MsgElevate:     rpcElevate,
+		sliverpb.MsgImpersonate: rpcImpersonate,
 
 		sliverpb.MsgLsReq:       rpcLs,
 		sliverpb.MsgRmReq:       rpcRm,
@@ -85,10 +86,15 @@ var (
 		sliverpb.MsgDownloadReq: rpcDownload,
 		sliverpb.MsgUploadReq:   rpcUpload,
 
-		sliverpb.MsgShellReq: rpcShell,
+		sliverpb.MsgIfconfigReq: rpcIfconfig,
 
-		clientpb.MsgTask:    rpcLocalTask,
+		sliverpb.MsgShellReq:   rpcShell,
+		sliverpb.MsgExecuteReq: rpcExecute,
+
+		clientpb.MsgTask:    rpcTask,
 		clientpb.MsgMigrate: rpcMigrate,
+
+		clientpb.MsgSideloadReq: rpcSideload,
 	}
 
 	tunHandlers = &map[uint32]TunnelHandler{

