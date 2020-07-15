@@ -25,14 +25,17 @@ const (
 
 // Events
 const (
+	UpdateStr  = "update"
+	VersionStr = "version"
+
 	EventStr = "event"
 
 	ServerErrorStr = "server"
 
 	// ConnectedEvent - Sliver Connected
-	ConnectedEvent = "connected"
+	SessionOpenedEvent = "connected"
 	// DisconnectedEvent - Sliver disconnected
-	DisconnectedEvent = "disconnected"
+	SessionClosedEvent = "disconnected"
 
 	// JoinedEvent - Player joined the game
 	JoinedEvent = "joined"
@@ -43,9 +46,9 @@ const (
 	CanaryEvent = "canary"
 
 	// StartedEvent - Job was started
-	StartedEvent = "started"
+	JobStartedEvent = "started"
 	// StoppedEvent - Job was stopped
-	StoppedEvent = "stopped"
+	JobStoppedEvent = "stopped"
 )
 
 // Commands
@@ -63,18 +66,20 @@ const (
 	GenerateStr        = "generate"
 	RegenerateStr      = "regenerate"
 	ProfileGenerateStr = "generate-profile"
-	GenerateEggStr     = "generate-egg"
+	StagerStr          = "stager"
 	ProfilesStr        = "profiles"
 	NewProfileStr      = "new-profile"
 
 	ListSliverBuildsStr = "slivers"
 	ListCanariesStr     = "canaries"
 
-	JobsStr  = "jobs"
-	MtlsStr  = "mtls"
-	DnsStr   = "dns"
-	HttpStr  = "http"
-	HttpsStr = "https"
+	JobsStr        = "jobs"
+	MtlsStr        = "mtls"
+	DnsStr         = "dns"
+	HttpStr        = "http"
+	HttpsStr       = "https"
+	NamedPipeStr   = "named-pipe"
+	TCPListenerStr = "tcp-pivot"
 
 	MsfStr       = "msf"
 	MsfInjectStr = "msf-inject"
@@ -101,6 +106,7 @@ const (
 	DownloadStr = "download"
 	UploadStr   = "upload"
 	IfconfigStr = "ifconfig"
+	NetstatStr  = "netstat"
 
 	ProcdumpStr         = "procdump"
 	ImpersonateStr      = "impersonate"
@@ -113,12 +119,21 @@ const (
 	MigrateStr          = "migrate"
 	SideloadStr         = "sideload"
 	SpawnDllStr         = "spawndll"
+	LoadExtensionStr    = "load-extension"
+	StageListenerStr    = "stage-listener"
 
 	WebsitesStr = "websites"
 
-	// Groups
+	ScreenshotStr = "screenshot"
+	PsExecStr     = "psexec"
+	BackdoorStr   = "backdoor"
+)
+
+// Groups
+const (
 	GenericHelpGroup     = "Generic:"
 	SliverHelpGroup      = "Sliver:"
 	SliverWinHelpGroup   = "Sliver - Windows:"
 	MultiplayerHelpGroup = "Multiplayer:"
+	ExtensionHelpGroup   = "Sliver - 3rd Party extensions:"
 )

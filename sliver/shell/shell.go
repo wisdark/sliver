@@ -35,9 +35,10 @@ import (
 	// {{end}}
 
 	// {{if eq .GOOS "windows"}}
+	"syscall"
+
 	"github.com/bishopfox/sliver/sliver/priv"
 	"golang.org/x/sys/windows"
-	"syscall"
 	// {{end}}
 )
 

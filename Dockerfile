@@ -1,4 +1,4 @@
-FROM golang:1.13.7
+FROM golang:1.14.4
 
 #
 # IMPORTANT: This Dockerfile is used for testing, I do not recommend deploying
@@ -6,7 +6,9 @@ FROM golang:1.13.7
 #            a Docker deployment this is probably a good place to start.
 #
 
-ENV PROTOC_VER 3.7.1
+ENV PROTOC_VER 3.11.4
+ENV PROTOC_GEN_GO_VER 1.3.5
+ENV PACKR_VER 1.30.1
 
 # Base packages
 RUN apt-get update --fix-missing && apt-get -y install \
@@ -48,11 +50,15 @@ RUN wget -O protoc-${PROTOC_VER}-linux-x86_64.zip https://github.com/protocolbuf
     && cp -vv ./bin/protoc /usr/local/bin
 
 # go get utils
-RUN go get github.com/golang/protobuf/protoc-gen-go
-RUN go get -u github.com/gobuffalo/packr/packr
+RUN wget -O packr.tar.gz https://github.com/gobuffalo/packr/archive/v${PACKR_VER}.tar.gz \
+  && tar xvf packr.tar.gz \
+  && cd packr-${PACKR_VER} \
+  && make install
 
-# install dep
-RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+RUN wget -O protoc-gen-go.tar.gz https://github.com/golang/protobuf/archive/v${PROTOC_GEN_GO_VER}.tar.gz \
+  && tar xvf protoc-gen-go.tar.gz \
+  && cd protobuf-${PROTOC_GEN_GO_VER} \
+  && make install
 
 # assets
 WORKDIR /go/src/github.com/bishopfox/sliver
@@ -63,12 +69,12 @@ RUN ./go-assets.sh
 ADD . /go/src/github.com/bishopfox/sliver/
 RUN make static-linux && cp -vv sliver-server /opt/sliver-server
 
-# USER sliver
-RUN ls -lah && /opt/sliver-server -unpack \
+RUN ls -lah && /opt/sliver-server unpack --force \
   && /go/src/github.com/bishopfox/sliver/go-tests.sh
 RUN make clean \
     && rm -rf /go/src/* \
     && rm -rf /home/sliver/.sliver
 
+USER sliver
 WORKDIR /home/sliver/
 ENTRYPOINT [ "/opt/sliver-server" ]
