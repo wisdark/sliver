@@ -37,6 +37,8 @@ message Session {
   string ActiveC2 = 14;
   string Version = 15;
   bool Evasion = 16;
+  bool IsDead = 17;
+  uint32 ReconnectInterval = 18;
 }
 
 message ImplantC2 {
@@ -67,6 +69,7 @@ message ImplantConfig {
   string LimitDatetime = 21;
   string LimitHostname = 22;
   string LimitUsername = 23;
+  string LimitFileExists = 32;
 
   enum OutputFormat {
     SHARED_LIB = 0;
@@ -79,11 +82,16 @@ message ImplantConfig {
 
   string FileName = 27;
   bool IsService = 28;
+  bool IsShellcode = 29;
 }
 
 // Configs of previously built implants
 message ImplantBuilds {
   map<string, ImplantConfig> Configs = 1;
+}
+
+message DeleteReq {
+  string Name = 1;
 }
 
 // DNSCanary - Single canary and metadata
@@ -142,7 +150,7 @@ message KillJob {
 message MTLSListenerReq {
   string Host = 1;
   uint32 Port = 2;
-
+  bool Persistent = 3;
 }
 
 message MTLSListener {
@@ -154,6 +162,7 @@ message DNSListenerReq {
   bool Canaries = 2;
   string Host = 3;
   uint32 Port = 4;
+  bool Persistent = 5;
 }
 
 message DNSListener {
@@ -169,12 +178,13 @@ message HTTPListenerReq {
   bytes Cert = 6;
   bytes Key = 7;
   bool ACME = 8;
+  bool Persistent = 9;
 }
 
 // Named Pipes Messages for pivoting
 message NamedPipesReq {
   string PipeName = 16;
-  
+
   commonpb.Request Request = 9;
 }
 
@@ -206,6 +216,11 @@ message HTTPListener {
 // [ commands ] ----------------------------------------
 message Sessions {
   repeated Session Sessions = 1;
+}
+
+message UpdateSession {
+  uint32 SessionID = 1;
+  string Name = 2;
 }
 
 message GenerateReq {
@@ -248,6 +263,9 @@ message StagerListenerReq {
   string Host = 2;
   uint32 Port = 3;
   bytes Data = 4;
+  bytes Cert = 5;
+  bytes Key = 6;
+  bool ACME = 7;
 }
 
 message StagerListener {
@@ -306,11 +324,11 @@ message CreateTunnelReq {
 message CreateTunnel {
   uint32 SessionID = 1;
 
-  uint64 TunnelID = 8;
+  uint64 TunnelID = 8 [jstype = JS_STRING];
 }
 
 message CloseTunnelReq {
-  uint64 TunnelID = 8;
+  uint64 TunnelID = 8 [jstype = JS_STRING];
 
   commonpb.Request Request = 9;
 }
@@ -346,7 +364,7 @@ message Operator {
 message WebContent {
   string Path = 1;
   string ContentType = 2;
-  uint64 Size = 3;
+  uint64 Size = 3 [jstype = JS_STRING];
 
   bytes Content = 9;
 }

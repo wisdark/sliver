@@ -32,8 +32,8 @@ import (
 var (
 	// Tunnels - Interating with duplex tunnels
 	Tunnels = tunnels{
-		tunnels: &map[uint64]*Tunnel{},
-		mutex:   &sync.RWMutex{},
+		tunnels: map[uint64]*Tunnel{},
+		mutex:   &sync.Mutex{},
 	}
 
 	// ErrInvalidTunnelID - Invalid tunnel ID value
@@ -44,16 +44,21 @@ var (
 // with an identifier, these tunnels are full duplex. The server doesn't really
 // care what data gets passed back and forth it just facilitates the connection
 type Tunnel struct {
-	ID          uint64
-	SessionID   uint32
-	ToImplant   chan []byte
-	FromImplant chan []byte
-	Client      rpcpb.SliverRPC_TunnelDataServer
+	ID        uint64
+	SessionID uint32
+
+	ToImplant         chan []byte
+	ToImplantSequence uint64
+
+	FromImplant         chan *sliverpb.TunnelData
+	FromImplantSequence uint64
+
+	Client rpcpb.SliverRPC_TunnelDataServer
 }
 
 type tunnels struct {
-	tunnels *map[uint64]*Tunnel
-	mutex   *sync.RWMutex
+	tunnels map[uint64]*Tunnel
+	mutex   *sync.Mutex
 }
 
 func (t *tunnels) Create(sessionID uint32) *Tunnel {
@@ -63,11 +68,11 @@ func (t *tunnels) Create(sessionID uint32) *Tunnel {
 		ID:          tunnelID,
 		SessionID:   session.ID,
 		ToImplant:   make(chan []byte),
-		FromImplant: make(chan []byte),
+		FromImplant: make(chan *sliverpb.TunnelData),
 	}
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	(*t.tunnels)[tunnel.ID] = tunnel
+	t.tunnels[tunnel.ID] = tunnel
 
 	return tunnel
 }
@@ -76,7 +81,7 @@ func (t *tunnels) Close(tunnelID uint64) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	tunnel := (*t.tunnels)[tunnelID]
+	tunnel := t.tunnels[tunnelID]
 	if tunnel == nil {
 		return ErrInvalidTunnelID
 	}
@@ -96,7 +101,7 @@ func (t *tunnels) Close(tunnelID uint64) error {
 		return err
 	}
 	tunnel.ToImplant <- data // Send an in-band close to implant
-	delete(*t.tunnels, tunnelID)
+	delete(t.tunnels, tunnelID)
 	close(tunnel.ToImplant)
 	close(tunnel.FromImplant)
 	return nil
@@ -106,7 +111,7 @@ func (t *tunnels) Close(tunnelID uint64) error {
 func (t *tunnels) Get(tunnelID uint64) *Tunnel {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	return (*t.tunnels)[tunnelID]
+	return t.tunnels[tunnelID]
 }
 
 // NewTunnelID - New 64-bit identifier

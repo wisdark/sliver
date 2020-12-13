@@ -25,10 +25,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 
@@ -106,7 +108,7 @@ func regenerate(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 		fmt.Printf(Warn+"%s\n", err)
 		return
 	}
-	err = ioutil.WriteFile(saveTo, regenerate.File.Data, 0500)
+	err = ioutil.WriteFile(saveTo, regenerate.File.Data, 0700)
 	if err != nil {
 		fmt.Printf(Warn+"Failed to write to %s\n", err)
 		return
@@ -160,6 +162,30 @@ func generateStager(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 	if lhost == "" {
 		fmt.Println(Warn + "please specify a listening host")
 		return
+	}
+	match, err := regexp.MatchString(`^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$`, lhost)
+	if err != nil {
+		return
+	}
+	if !match {
+		addr, err := net.LookupHost(lhost)
+		if err != nil {
+			fmt.Printf(Warn+"Error resolving %s: %v\n", lhost, err)
+			return
+		}
+		if len(addr) > 1 {
+			prompt := &survey.Select{
+				Message: "Select an address",
+				Options: addr,
+			}
+			err := survey.AskOne(prompt, &lhost)
+			if err != nil {
+				fmt.Printf(Warn+"Error: %v\n", err)
+				return
+			}
+		} else {
+			lhost = addr[0]
+		}
 	}
 	lport := ctx.Flags.Int("lport")
 	stageOS := ctx.Flags.String("os")
@@ -232,8 +258,21 @@ func generateStager(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 
 // Shared function that extracts the compile flags from the grumble context
 func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
+	var name string
 	targetOS := strings.ToLower(ctx.Flags.String("os"))
 	arch := strings.ToLower(ctx.Flags.String("arch"))
+
+	if ctx.Flags["name"] != nil {
+		name = strings.ToLower(ctx.Flags.String("name"))
+
+		if name != "" {
+			isAlphanumeric := regexp.MustCompile(`^[[:alnum:]]+$`).MatchString
+			if !isAlphanumeric(name) {
+				fmt.Printf(Warn + "Implant's name must be in alphanumeric only\n")
+				return nil
+			}
+		}
+	}
 
 	c2s := []*clientpb.ImplantC2{}
 
@@ -282,9 +321,11 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 	limitHostname := ctx.Flags.String("limit-hostname")
 	limitUsername := ctx.Flags.String("limit-username")
 	limitDatetime := ctx.Flags.String("limit-datetime")
+	limitFileExists := ctx.Flags.String("limit-fileexists")
 
 	isSharedLib := false
 	isService := false
+	isShellcode := false
 
 	format := ctx.Flags.String("format")
 	var configFormat clientpb.ImplantConfig_OutputFormat
@@ -296,7 +337,7 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 		isSharedLib = true
 	case "shellcode":
 		configFormat = clientpb.ImplantConfig_SHELLCODE
-		isSharedLib = true
+		isShellcode = true
 	case "service":
 		configFormat = clientpb.ImplantConfig_SERVICE
 		isService = true
@@ -329,6 +370,7 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 	config := &clientpb.ImplantConfig{
 		GOOS:             targetOS,
 		GOARCH:           arch,
+		Name:             name,
 		Debug:            ctx.Flags.Bool("debug"),
 		Evasion:          ctx.Flags.Bool("evasion"),
 		ObfuscateSymbols: symbolObfuscation,
@@ -342,10 +384,12 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 		LimitHostname:     limitHostname,
 		LimitUsername:     limitUsername,
 		LimitDatetime:     limitDatetime,
+		LimitFileExists:   limitFileExists,
 
 		Format:      configFormat,
 		IsSharedLib: isSharedLib,
 		IsService:   isService,
+		IsShellcode: isShellcode,
 	}
 
 	return config
@@ -474,8 +518,8 @@ func profileGenerate(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 	if save == "" {
 		save, _ = os.Getwd()
 	}
-	profiles := getSliverProfiles(rpc)
-	if profile, ok := (*profiles)[name]; ok {
+	profile := getImplantProfileByName(rpc, name)
+	if profile != nil {
 		implantFile, err := compile(profile.Config, save, rpc)
 		if err != nil {
 			return
@@ -539,11 +583,11 @@ func compile(config *clientpb.ImplantConfig, save string, rpc rpcpb.SliverRPCCli
 }
 
 func profiles(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
-	profiles := getSliverProfiles(rpc)
+	profiles := getImplantProfiles(rpc)
 	if profiles == nil {
 		return
 	}
-	if len(*profiles) == 0 {
+	if len(profiles) == 0 {
 		fmt.Printf(Info+"No profiles, create one with `%s`\n", consts.NewProfileStr)
 		return
 	}
@@ -558,7 +602,7 @@ func profiles(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 		strings.Repeat("=", len("Obfuscation")),
 		strings.Repeat("=", len("Limitations")))
 
-	for name, profile := range *profiles {
+	for _, profile := range profiles {
 		config := profile.Config
 		if 0 < len(config.C2) {
 			obfuscation := "strings only"
@@ -569,7 +613,7 @@ func profiles(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 				obfuscation = "none"
 			}
 			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				name,
+				profile.Name,
 				fmt.Sprintf("%s/%s", config.GOOS, config.GOARCH),
 				fmt.Sprintf("[1] %s", config.C2[0].URL),
 				fmt.Sprintf("%v", config.Debug),
@@ -610,11 +654,14 @@ func getLimitsString(config *clientpb.ImplantConfig) string {
 	if config.LimitHostname != "" {
 		limits = append(limits, fmt.Sprintf("hostname=%s", config.LimitHostname))
 	}
+	if config.LimitFileExists != "" {
+		limits = append(limits, fmt.Sprintf("fileexists=%s", config.LimitFileExists))
+	}
 	return strings.Join(limits, "; ")
 }
 
 func newProfile(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
-	name := ctx.Flags.String("name")
+	name := ctx.Flags.String("profile-name")
 	if name == "" {
 		fmt.Printf(Warn + "Invalid profile name\n")
 		return
@@ -635,17 +682,41 @@ func newProfile(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 	}
 }
 
-func getSliverProfiles(rpc rpcpb.SliverRPCClient) *map[string]*clientpb.ImplantProfile {
+func rmProfile(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
+	if len(ctx.Args) < 1 {
+		fmt.Printf(Warn+"Invalid implant name, see `%s %s --help`\n", consts.ProfilesStr, consts.RmStr)
+		return
+	}
+	_, err := rpc.DeleteImplantProfile(context.Background(), &clientpb.DeleteReq{
+		Name: ctx.Args[0],
+	})
+	if err != nil {
+		fmt.Printf(Warn+"Failed to delete profile %s\n", err)
+		return
+	}
+}
+
+func getImplantProfiles(rpc rpcpb.SliverRPCClient) []*clientpb.ImplantProfile {
 	pbProfiles, err := rpc.ImplantProfiles(context.Background(), &commonpb.Empty{})
 	if err != nil {
 		fmt.Printf(Warn+"Error %s", err)
 		return nil
 	}
-	profiles := &map[string]*clientpb.ImplantProfile{}
-	for _, profile := range pbProfiles.Profiles {
-		(*profiles)[profile.Name] = profile
+	return pbProfiles.Profiles
+}
+
+func getImplantProfileByName(rpc rpcpb.SliverRPCClient, name string) *clientpb.ImplantProfile {
+	pbProfiles, err := rpc.ImplantProfiles(context.Background(), &commonpb.Empty{})
+	if err != nil {
+		fmt.Printf(Warn+"Error %s", err)
+		return nil
 	}
-	return profiles
+	for _, profile := range pbProfiles.Profiles {
+		if profile.Name == name {
+			return profile
+		}
+	}
+	return nil
 }
 
 func canaries(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {

@@ -142,9 +142,20 @@ func eventLoop(app *grumble.App, rpc rpcpb.SliverRPCClient) {
 
 		case consts.SessionOpenedEvent:
 			session := event.Session
+			// The HTTP session handling is performed in two steps:
+			// - first we add an "empty" session
+			// - then we complete the session info when we receive the Register message from the Sliver
+			// This check is here to avoid displaying two sessions events for the same session
+			if session.OS != "" {
+				currentTime := time.Now().Format(time.RFC1123)
+				fmt.Printf(clearln+Info+"Session #%d %s - %s (%s) - %s/%s - %v\n\n",
+					session.ID, session.Name, session.RemoteAddress, session.Hostname, session.OS, session.Arch, currentTime)
+			}
+
+		case consts.SessionUpdateEvent:
+			session := event.Session
 			currentTime := time.Now().Format(time.RFC1123)
-			fmt.Printf(clearln+Info+"Session #%d %s - %s (%s) - %s/%s - %v\n\n",
-				session.ID, session.Name, session.RemoteAddress, session.Hostname, session.OS, session.Arch, currentTime)
+			fmt.Printf(clearln+Info+"Session #%d has been updated - %v\n", session.ID, currentTime)
 
 		case consts.SessionClosedEvent:
 			session := event.Session

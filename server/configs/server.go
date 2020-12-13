@@ -19,10 +19,13 @@ package configs
 */
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"io/ioutil"
+	insecureRand "math/rand"
 	"os"
 	"path"
+	"time"
 
 	"github.com/bishopfox/sliver/server/assets"
 	"github.com/bishopfox/sliver/server/log"
@@ -58,11 +61,46 @@ type DaemonConfig struct {
 	Port int    `json:"port"`
 }
 
+// JobConfig - Restart Jobs on Load
+type JobConfig struct {
+	MTLS []*MTLSJobConfig `json:"mtls,omitempty"`
+	DNS  []*DNSJobConfig  `json:"dns,omitempty"`
+	HTTP []*HTTPJobConfig `json:"http,omitempty"`
+}
+
+// MTLSJobConfig - Per-type job configs
+type MTLSJobConfig struct {
+	Host  string `json:"host"`
+	Port  uint16 `json:"port"`
+	JobID string `json:"jobid"`
+}
+
+type DNSJobConfig struct {
+	Domains  []string `json:"domains"`
+	Canaries bool     `json:"canaries"`
+	Host     string   `json:"host"`
+	Port     uint16   `json:"port"`
+	JobID    string   `json:"jobid"`
+}
+
+type HTTPJobConfig struct {
+	Domain  string `json:"domain"`
+	Host    string `json:"host"`
+	Port    uint16 `json:"port"`
+	Secure  bool   `json:"secure"`
+	Website string `json:"website"`
+	Cert    []byte `json:"cert"`
+	Key     []byte `json:"key"`
+	ACME    bool   `json:"acme"`
+	JobID   string `json:"jobid"`
+}
+
 // ServerConfig - Server config
 type ServerConfig struct {
 	DaemonMode   bool          `json:"daemon_mode"`
 	DaemonConfig *DaemonConfig `json:"daemon"`
 	Logs         *LogConfig    `json:"logs"`
+	Jobs         *JobConfig    `json:"jobs,omitempty"`
 }
 
 // Save - Save config file to disk
@@ -88,6 +126,62 @@ func (c *ServerConfig) Save() error {
 	return nil
 }
 
+// AddMTLSJob - Add Job Configs
+func (c *ServerConfig) AddMTLSJob(config *MTLSJobConfig) error {
+	if c.Jobs == nil {
+		c.Jobs = &JobConfig{}
+	}
+	config.JobID = getRandomID()
+	c.Jobs.MTLS = append(c.Jobs.MTLS, config)
+	return c.Save()
+}
+
+// AddDNSJob - Add a persistent DNS job
+func (c *ServerConfig) AddDNSJob(config *DNSJobConfig) error {
+	if c.Jobs == nil {
+		c.Jobs = &JobConfig{}
+	}
+	config.JobID = getRandomID()
+	c.Jobs.DNS = append(c.Jobs.DNS, config)
+	return c.Save()
+}
+
+// AddHTTPJob - Add a persistent job
+func (c *ServerConfig) AddHTTPJob(config *HTTPJobConfig) error {
+	if c.Jobs == nil {
+		c.Jobs = &JobConfig{}
+	}
+	config.JobID = getRandomID()
+	c.Jobs.HTTP = append(c.Jobs.HTTP, config)
+	return c.Save()
+}
+
+// RemoveJob - Remove Job by ID
+func (c *ServerConfig) RemoveJob(jobID string) {
+	if c.Jobs == nil {
+		return
+	}
+	defer c.Save()
+	for i, j := range c.Jobs.MTLS {
+		if j.JobID == jobID {
+			c.Jobs.MTLS = append(c.Jobs.MTLS[:i], c.Jobs.MTLS[i+1:]...)
+			return
+		}
+	}
+	for i, j := range c.Jobs.DNS {
+		if j.JobID == jobID {
+			c.Jobs.DNS = append(c.Jobs.DNS[:i], c.Jobs.DNS[i+1:]...)
+			return
+		}
+	}
+	for i, j := range c.Jobs.HTTP {
+		if j.JobID == jobID {
+			c.Jobs.HTTP = append(c.Jobs.HTTP[:i], c.Jobs.HTTP[i+1:]...)
+			return
+		}
+	}
+}
+
 // GetServerConfig - Get config value
 func GetServerConfig() *ServerConfig {
 	configPath := GetServerConfigPath()
@@ -106,6 +200,14 @@ func GetServerConfig() *ServerConfig {
 	} else {
 		serverConfigLog.Warnf("Config file does not exist, using defaults")
 	}
+
+	if config.Logs.Level < 0 {
+		config.Logs.Level = 0
+	}
+	if 6 < config.Logs.Level {
+		config.Logs.Level = 6
+	}
+
 	err := config.Save() // This updates the config with any missing fields
 	if err != nil {
 		serverConfigLog.Errorf("Failed to save default config %s", err)
@@ -121,9 +223,17 @@ func getDefaultServerConfig() *ServerConfig {
 			Port: 31337,
 		},
 		Logs: &LogConfig{
-			Level:              int(logrus.DebugLevel),
-			GRPCUnaryPayloads:  true,
-			GRPCStreamPayloads: true,
+			Level:              int(logrus.InfoLevel),
+			GRPCUnaryPayloads:  false,
+			GRPCStreamPayloads: false,
 		},
+		Jobs: &JobConfig{},
 	}
+}
+
+func getRandomID() string {
+	seededRand := insecureRand.New(insecureRand.NewSource(time.Now().UnixNano()))
+	buf := make([]byte, 32)
+	seededRand.Read(buf)
+	return hex.EncodeToString(buf)
 }

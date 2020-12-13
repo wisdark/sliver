@@ -30,25 +30,39 @@ const (
 
 	EventStr = "event"
 
-	ServerErrorStr = "server"
+	ServerErrorStr = "server-error"
 
 	// ConnectedEvent - Sliver Connected
-	SessionOpenedEvent = "connected"
+	SessionOpenedEvent = "session-connected"
 	// DisconnectedEvent - Sliver disconnected
-	SessionClosedEvent = "disconnected"
+	SessionClosedEvent = "session-disconnected"
+	// UpdateEvent - Sliver updated
+	SessionUpdateEvent = "session-updated"
 
 	// JoinedEvent - Player joined the game
-	JoinedEvent = "joined"
+	JoinedEvent = "client-joined"
 	// LeftEvent - Player left the game
-	LeftEvent = "left"
+	LeftEvent = "client-left"
 
 	// CanaryEvent - A DNS canary was triggered
 	CanaryEvent = "canary"
 
 	// StartedEvent - Job was started
-	JobStartedEvent = "started"
+	JobStartedEvent = "job-started"
 	// StoppedEvent - Job was stopped
-	JobStoppedEvent = "stopped"
+	JobStoppedEvent = "job-stopped"
+
+	// BuildEvent - Fires on change to builds
+	BuildEvent = "build"
+
+	// BuildCompletedEvent - Fires when a build completes
+	BuildCompletedEvent = "build-completed"
+
+	// ProfileEvent - Fires whenever there's a change to profiles
+	ProfileEvent = "profile"
+
+	// WebsiteEvent - Fires whenever there's a change to websites
+	WebsiteEvent = "website"
 )
 
 // Commands
@@ -62,6 +76,7 @@ const (
 	BackgroundStr = "background"
 	InfoStr       = "info"
 	UseStr        = "use"
+	SetStr        = "set"
 
 	GenerateStr        = "generate"
 	RegenerateStr      = "regenerate"
@@ -70,8 +85,8 @@ const (
 	ProfilesStr        = "profiles"
 	NewProfileStr      = "new-profile"
 
-	ListSliverBuildsStr = "slivers"
-	ListCanariesStr     = "canaries"
+	ImplantBuildsStr = "implants"
+	ListCanariesStr  = "canaries"
 
 	JobsStr        = "jobs"
 	MtlsStr        = "mtls"
@@ -122,11 +137,18 @@ const (
 	LoadExtensionStr    = "load-extension"
 	StageListenerStr    = "stage-listener"
 
-	WebsitesStr = "websites"
+	WebsitesStr       = "websites"
+	RmWebContentStr   = "rm-content"
+	AddWebContentStr  = "add-content"
+	WebContentTypeStr = "content-type"
 
 	ScreenshotStr = "screenshot"
 	PsExecStr     = "psexec"
 	BackdoorStr   = "backdoor"
+	MakeTokenStr  = "make-token"
+	GetEnvStr     = "getenv"
+
+	LicensesStr = "licenses"
 )
 
 // Groups

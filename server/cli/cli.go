@@ -27,6 +27,7 @@ import (
 
 	"github.com/bishopfox/sliver/client/version"
 	"github.com/bishopfox/sliver/server/assets"
+	"github.com/bishopfox/sliver/server/c2"
 	"github.com/bishopfox/sliver/server/certs"
 	"github.com/bishopfox/sliver/server/configs"
 	"github.com/bishopfox/sliver/server/console"
@@ -60,7 +61,7 @@ const (
 // Initialize logging
 func initLogging(appDir string) *os.File {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	logFile, err := os.OpenFile(path.Join(appDir, "logs", logFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile(path.Join(appDir, "logs", logFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		log.Fatalf("Error opening file: %v", err)
 	}
@@ -112,6 +113,7 @@ var rootCmd = &cobra.Command{
 		certs.SetupCAs()
 
 		serverConfig := configs.GetServerConfig()
+		c2.StartPersistentJobs(serverConfig)
 		if serverConfig.DaemonMode {
 			daemon.Start()
 		} else {
