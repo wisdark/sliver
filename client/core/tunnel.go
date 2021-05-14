@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -12,27 +11,10 @@ import (
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
 )
 
-const (
-	randomIDSize = 16 // 64bits
-)
-
 var (
 	// Tunnels - Holds refs to all tunnels
 	Tunnels tunnels
 )
-
-type tunnelAddr struct {
-	network string
-	addr    string
-}
-
-func (a *tunnelAddr) Network() string {
-	return a.network
-}
-
-func (a *tunnelAddr) String() string {
-	return fmt.Sprintf("%s://%s", a.network, a.addr)
-}
 
 // Holds the tunnels locally so we can map incoming data
 // messages to the tunnel
@@ -144,9 +126,9 @@ func TunnelLoop(rpc rpcpb.SliverRPCClient) error {
 	}
 	for {
 
-		log.Printf("Waiting for TunnelData ...")
+		// log.Printf("Waiting for TunnelData ...")
 		incoming, err := stream.Recv()
-		log.Printf("Recv stream msg: %v", incoming)
+		// log.Printf("Recv stream msg: %v", incoming)
 		if err == io.EOF {
 			log.Printf("EOF Error: Tunnel data stream closed")
 			return nil
@@ -155,7 +137,7 @@ func TunnelLoop(rpc rpcpb.SliverRPCClient) error {
 			log.Printf("Tunnel data read error: %s", err)
 			return err
 		}
-		log.Printf("Received TunnelData for tunnel %d", incoming.TunnelID)
+		// log.Printf("Received TunnelData for tunnel %d", incoming.TunnelID)
 		tunnel := Tunnels.Get(incoming.TunnelID)
 		if tunnel != nil {
 			if !incoming.Closed {

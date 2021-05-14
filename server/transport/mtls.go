@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"runtime/debug"
 
 	"github.com/bishopfox/sliver/protobuf/rpcpb"
 	"github.com/bishopfox/sliver/server/certs"
@@ -49,7 +50,9 @@ var (
 // StartClientListener - Start a mutual TLS listener
 func StartClientListener(host string, port uint16) (*grpc.Server, net.Listener, error) {
 	mtlsLog.Infof("Starting gRPC  listener on %s:%d", host, port)
-	tlsConfig := getOperatorServerTLSConfig(host)
+
+	tlsConfig := getOperatorServerTLSConfig("multiplayer")
+
 	creds := credentials.NewTLS(tlsConfig)
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
@@ -65,8 +68,16 @@ func StartClientListener(host string, port uint16) (*grpc.Server, net.Listener, 
 	grpcServer := grpc.NewServer(options...)
 	rpcpb.RegisterSliverRPCServer(grpcServer, rpc.NewServer())
 	go func() {
+		panicked := true
+		defer func() {
+			if panicked {
+				mtlsLog.Errorf("stacktrace from panic: %s", string(debug.Stack()))
+			}
+		}()
 		if err := grpcServer.Serve(ln); err != nil {
 			mtlsLog.Warnf("gRPC server exited with error: %v", err)
+		} else {
+			panicked = false
 		}
 	}()
 	return grpcServer, ln, nil

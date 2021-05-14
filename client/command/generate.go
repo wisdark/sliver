@@ -45,33 +45,45 @@ import (
 	"github.com/desertbit/grumble"
 )
 
-var validFormats = []string{
-	"bash",
-	"c",
-	"csharp",
-	"dw",
-	"dword",
-	"hex",
-	"java",
-	"js_be",
-	"js_le",
-	"num",
-	"perl",
-	"pl",
-	"powershell",
-	"ps1",
-	"py",
-	"python",
-	"raw",
-	"rb",
-	"ruby",
-	"sh",
-	"vbapplication",
-	"vbscript",
-}
+var (
+	// SupportedCompilerTargets - Supported compiler targets
+	SupportedCompilerTargets = map[string]bool{
+		"darwin/amd64":  true,
+		"darwin/arm64":  true,
+		"linux/386":     true,
+		"linux/amd64":   true,
+		"windows/386":   true,
+		"windows/amd64": true,
+	}
+
+	validFormats = []string{
+		"bash",
+		"c",
+		"csharp",
+		"dw",
+		"dword",
+		"hex",
+		"java",
+		"js_be",
+		"js_le",
+		"num",
+		"perl",
+		"pl",
+		"powershell",
+		"ps1",
+		"py",
+		"python",
+		"raw",
+		"rb",
+		"ruby",
+		"sh",
+		"vbapplication",
+		"vbscript",
+	}
+)
 
 func generate(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
-	config := parseCompileFlags(ctx)
+	config := parseCompileFlags(ctx, rpc)
 	if config == nil {
 		return
 	}
@@ -257,11 +269,8 @@ func generateStager(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 }
 
 // Shared function that extracts the compile flags from the grumble context
-func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
+func parseCompileFlags(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) *clientpb.ImplantConfig {
 	var name string
-	targetOS := strings.ToLower(ctx.Flags.String("os"))
-	arch := strings.ToLower(ctx.Flags.String("arch"))
-
 	if ctx.Flags["name"] != nil {
 		name = strings.ToLower(ctx.Flags.String("name"))
 
@@ -278,6 +287,9 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 
 	mtlsC2 := parseMTLSc2(ctx.Flags.String("mtls"))
 	c2s = append(c2s, mtlsC2...)
+
+	wgC2 := parseWGc2(ctx.Flags.String("wg"))
+	c2s = append(c2s, wgC2...)
 
 	httpC2 := parseHTTPc2(ctx.Flags.String("http"))
 	c2s = append(c2s, httpC2...)
@@ -298,8 +310,8 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 		symbolObfuscation = !ctx.Flags.Bool("skip-symbols")
 	}
 
-	if len(mtlsC2) == 0 && len(httpC2) == 0 && len(dnsC2) == 0 && len(namedPipeC2) == 0 && len(tcpPivotC2) == 0 {
-		fmt.Printf(Warn + "Must specify at least one of --mtls, --http, --dns, --named-pipe, or --tcp-pivot\n")
+	if len(mtlsC2) == 0 && len(wgC2) == 0 && len(httpC2) == 0 && len(dnsC2) == 0 && len(namedPipeC2) == 0 && len(tcpPivotC2) == 0 {
+		fmt.Printf(Warn + "Must specify at least one of --mtls, --wg, --http, --dns, --named-pipe, or --tcp-pivot\n")
 		return nil
 	}
 
@@ -315,6 +327,7 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 	}
 
 	reconnectInterval := ctx.Flags.Int("reconnect")
+	pollInterval := ctx.Flags.Int("poll")
 	maxConnectionErrors := ctx.Flags.Int("max-errors")
 
 	limitDomainJoined := ctx.Flags.Bool("limit-domainjoined")
@@ -345,26 +358,28 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 		// default to exe
 		configFormat = clientpb.ImplantConfig_EXECUTABLE
 	}
-	/* For UX we convert some synonymous terms */
-	if targetOS == "darwin" || targetOS == "mac" || targetOS == "macos" || targetOS == "m" || targetOS == "osx" {
-		targetOS = "darwin"
-	}
-	if targetOS == "windows" || targetOS == "win" || targetOS == "w" || targetOS == "shit" {
-		targetOS = "windows"
-	}
-	if targetOS == "linux" || targetOS == "unix" || targetOS == "l" {
-		targetOS = "linux"
-	}
-	if arch == "x64" || strings.HasPrefix(arch, "64") {
-		arch = "amd64"
-	}
-	if arch == "x86" || strings.HasPrefix(arch, "32") {
-		arch = "386"
+
+	targetOS := strings.ToLower(ctx.Flags.String("os"))
+	arch := strings.ToLower(ctx.Flags.String("arch"))
+	targetOS, arch = getTargets(targetOS, arch)
+	if targetOS == "" || arch == "" {
+		return nil
 	}
 
 	if len(namedPipeC2) > 0 && targetOS != "windows" {
 		fmt.Printf(Warn + "Named pipe pivoting can only be used in Windows.")
 		return nil
+	}
+
+	var tunIP net.IP
+	if wg := ctx.Flags.String("wg"); wg != "" {
+		uniqueWGIP, err := rpc.GenerateUniqueIP(context.Background(), &commonpb.Empty{})
+		tunIP = net.ParseIP(uniqueWGIP.IP)
+		if err != nil {
+			fmt.Println(Warn + "Failed to generate unique ip for wg peer tun interface")
+			return nil
+		}
+		fmt.Printf(Info+"Generated unique ip for wg peer tun interface: %s\n", tunIP.String())
 	}
 
 	config := &clientpb.ImplantConfig{
@@ -377,7 +392,12 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 		C2:               c2s,
 		CanaryDomains:    canaryDomains,
 
+		WGPeerTunIP:       tunIP.String(),
+		WGKeyExchangePort: uint32(ctx.Flags.Int("key-exchange")),
+		WGTcpCommsPort:    uint32(ctx.Flags.Int("tcp-comms")),
+
 		ReconnectInterval:   uint32(reconnectInterval),
+		PollInterval:        uint32(pollInterval),
 		MaxConnectionErrors: uint32(maxConnectionErrors),
 
 		LimitDomainJoined: limitDomainJoined,
@@ -393,6 +413,41 @@ func parseCompileFlags(ctx *grumble.Context) *clientpb.ImplantConfig {
 	}
 
 	return config
+}
+
+func getTargets(targetOS string, targetArch string) (string, string) {
+
+	/* For UX we convert some synonymous terms */
+	if targetOS == "darwin" || targetOS == "mac" || targetOS == "macos" || targetOS == "osx" {
+		targetOS = "darwin"
+	}
+	if targetOS == "windows" || targetOS == "win" || targetOS == "shit" {
+		targetOS = "windows"
+	}
+	if targetOS == "linux" || targetOS == "lin" {
+		targetOS = "linux"
+	}
+
+	if targetArch == "amd64" || targetArch == "x64" || strings.HasPrefix(targetArch, "64") {
+		targetArch = "amd64"
+	}
+	if targetArch == "386" || targetArch == "x86" || strings.HasPrefix(targetArch, "32") {
+		targetArch = "386"
+	}
+
+	target := fmt.Sprintf("%s/%s", targetOS, targetArch)
+	if _, ok := SupportedCompilerTargets[target]; !ok {
+		prompt := &survey.Confirm{
+			Message: fmt.Sprintf("Unsupported compiler target %s, try to build anyways?", target),
+		}
+		var confirm bool
+		survey.AskOne(prompt, &confirm)
+		if !confirm {
+			return "", ""
+		}
+	}
+
+	return targetOS, targetArch
 }
 
 func parseMTLSc2(args string) []*clientpb.ImplantC2 {
@@ -414,6 +469,26 @@ func parseMTLSc2(args string) []*clientpb.ImplantC2 {
 	return c2s
 }
 
+func parseWGc2(args string) []*clientpb.ImplantC2 {
+	c2s := []*clientpb.ImplantC2{}
+	if args == "" {
+		return c2s
+	}
+	for index, arg := range strings.Split(args, ",") {
+		arg = strings.ToLower(arg)
+		uri := url.URL{Scheme: "wg"}
+		uri.Host = arg
+		if uri.Port() == "" {
+			uri.Host = fmt.Sprintf("%s:%d", uri.Host, defaultWGLPort)
+		}
+		c2s = append(c2s, &clientpb.ImplantC2{
+			Priority: uint32(index),
+			URL:      uri.String(),
+		})
+	}
+	return c2s
+}
+
 func parseHTTPc2(args string) []*clientpb.ImplantC2 {
 	c2s := []*clientpb.ImplantC2{}
 	if args == "" {
@@ -426,12 +501,15 @@ func parseHTTPc2(args string) []*clientpb.ImplantC2 {
 		if strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
 			uri, err = url.Parse(arg)
 			if err != nil {
-				log.Printf("Failed to parse c2 URL %v", err)
+				log.Printf("Failed to parse C2 URL %s", err)
 				continue
 			}
 		} else {
-			uri = &url.URL{Scheme: "https"} // HTTPS is the default, will fallback to HTTP
-			uri.Host = arg
+			uri, err = url.Parse(fmt.Sprintf("https://%s", arg))
+			if err != nil {
+				log.Printf("Failed to parse C2 URL %s", err)
+				continue
+			}
 		}
 		c2s = append(c2s, &clientpb.ImplantC2{
 			Priority: uint32(index),
@@ -666,7 +744,7 @@ func newProfile(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 		fmt.Printf(Warn + "Invalid profile name\n")
 		return
 	}
-	config := parseCompileFlags(ctx)
+	config := parseCompileFlags(ctx, rpc)
 	if config == nil {
 		return
 	}

@@ -19,8 +19,10 @@ package c2
 */
 
 import (
+	"encoding/json"
 	"sync"
 
+	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
 	"github.com/bishopfox/sliver/server/core"
 	serverHandlers "github.com/bishopfox/sliver/server/handlers"
@@ -29,7 +31,7 @@ import (
 )
 
 var (
-	pivotLog        = log.NamedLogger("c2", "pivot")
+	pivotLog = log.NamedLogger("c2", "pivot")
 
 	// Pivots - holds the pivots, provides atomic access
 	Pivots = &PivotsMap{
@@ -106,17 +108,18 @@ func HandlePivotOpen(session *core.Session, data []byte) {
 		Send:          make(chan *sliverpb.Envelope),
 		RespMutex:     &sync.RWMutex{},
 		Resp:          map[uint64]chan *sliverpb.Envelope{},
-		Name: 		   register.Name,
-		Hostname: 	   register.Hostname,
-		Username: 	   register.Username,
-		UID: 		   register.Uid,
-		GID: 		   register.Gid,
-		Os: 		   register.Os,
-		Arch: 		   register.Arch,
-		PID: 		   register.Pid,
-		Filename:	   register.Filename,
-		ActiveC2: 	   register.ActiveC2,
-		Version: 	   register.Version,
+		Name:          register.Name,
+		Hostname:      register.Hostname,
+		UUID:          register.Uuid,
+		Username:      register.Username,
+		UID:           register.Uid,
+		GID:           register.Gid,
+		Os:            register.Os,
+		Arch:          register.Arch,
+		PID:           register.Pid,
+		Filename:      register.Filename,
+		ActiveC2:      register.ActiveC2,
+		Version:       register.Version,
 	}
 	go func() {
 		for envelope := range sliverPivoted.Send {
@@ -132,7 +135,25 @@ func HandlePivotOpen(session *core.Session, data []byte) {
 		}
 	}()
 	core.Sessions.Add(sliverPivoted)
+	go auditLogSession(sliverPivoted, register)
 	Pivots.AddSession(pivotOpen.GetPivotID(), sliverPivoted)
+}
+
+type auditLogNewSessionMsg struct {
+	Session  *clientpb.Session
+	Register *sliverpb.Register
+}
+
+func auditLogSession(session *core.Session, register *sliverpb.Register) {
+	msg, err := json.Marshal(auditLogNewSessionMsg{
+		Session:  session.ToProtobuf(),
+		Register: register,
+	})
+	if err != nil {
+		pivotLog.Errorf("Failed to log new session to audit log %s", err)
+	} else {
+		log.AuditLogger.Warn(string(msg))
+	}
 }
 
 // HandlePivotClose - Handles a PivotClose message

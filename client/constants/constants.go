@@ -90,6 +90,7 @@ const (
 
 	JobsStr        = "jobs"
 	MtlsStr        = "mtls"
+	WGStr          = "wg"
 	DnsStr         = "dns"
 	HttpStr        = "http"
 	HttpsStr       = "https"
@@ -142,11 +143,25 @@ const (
 	AddWebContentStr  = "add-content"
 	WebContentTypeStr = "content-type"
 
-	ScreenshotStr = "screenshot"
-	PsExecStr     = "psexec"
-	BackdoorStr   = "backdoor"
-	MakeTokenStr  = "make-token"
-	GetEnvStr     = "getenv"
+	ScreenshotStr         = "screenshot"
+	PsExecStr             = "psexec"
+	BackdoorStr           = "backdoor"
+	MakeTokenStr          = "make-token"
+	GetEnvStr             = "getenv"
+	SetEnvStr             = "setenv"
+	UnsetEnvStr           = "unsetenv"
+	RegistryStr           = "registry"
+	RegistryReadStr       = "read"
+	RegistryWriteStr      = "write"
+	RegistryListSubStr    = "list-subkeys"
+	RegistryListValuesStr = "list-values"
+	RegistryCreateKeyStr  = "create"
+	PivotsListStr         = "pivots-list"
+	WgConfigStr           = "wg-config"
+	WgSocksStr            = "wg-socks"
+	WgPortFwdStr          = "wg-portfwd"
+
+	PortfwdStr = "portfwd"
 
 	LicensesStr = "licenses"
 )

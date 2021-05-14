@@ -20,9 +20,11 @@ package generate
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/bishopfox/sliver/protobuf/clientpb"
+	"github.com/bishopfox/sliver/server/certs"
 	"github.com/bishopfox/sliver/server/db/models"
 	"github.com/bishopfox/sliver/server/log"
 )
@@ -34,41 +36,43 @@ var (
 
 func TestSliverExecutableWindows(t *testing.T) {
 
+	// Wireguard C2
+	wireguardExe(t, "windows", "amd64", false)
+	wireguardExe(t, "windows", "386", false)
+	wireguardExe(t, "windows", "amd64", true)
+	wireguardExe(t, "windows", "386", true)
+
 	// mTLS C2
 	mtlsExe(t, "windows", "amd64", false)
-	//mtlsExe(t, "windows", "386", false)
+	mtlsExe(t, "windows", "386", false)
 	mtlsExe(t, "windows", "amd64", true)
-	//mtlsExe(t, "windows", "386", true)
+	mtlsExe(t, "windows", "386", true)
 
 	// DNS C2
 	dnsExe(t, "windows", "amd64", false)
-	//dnsExe(t, "windows", "386", false)
 	dnsExe(t, "windows", "amd64", true)
-	//dnsExe(t, "windows", "386", true)
 
 	// HTTP C2
 	httpExe(t, "windows", "amd64", false)
-	//httpExe(t, "windows", "386", false)
 	httpExe(t, "windows", "amd64", true)
-	//httpExe(t, "windows", "386", true)
 
 	// PIVOT TCP C2
 	tcpPivotExe(t, "windows", "amd64", false)
-	//httpExe(t, "windows", "386", false)
 	tcpPivotExe(t, "windows", "amd64", true)
-	//httpExe(t, "windows", "386", true)
 
 	// Named Pipe C2
 	namedPipeExe(t, "windows", "amd64", false)
-	//namedPipeExe(t, "windows", "386", false)
 	namedPipeExe(t, "windows", "amd64", true)
-	//namedPipeExe(t, "windows", "386", true)
 
 	// Multiple C2s
 	multiExe(t, "windows", "amd64", true)
 	multiExe(t, "windows", "amd64", false)
 	multiExe(t, "windows", "386", false)
 	multiExe(t, "windows", "386", false)
+
+	// Service
+	multiWindowsService(t, "windows", "amd64", true)
+	multiWindowsService(t, "windows", "amd64", false)
 }
 
 func TestSliverSharedLibWindows(t *testing.T) {
@@ -84,15 +88,42 @@ func TestSliverExecutableLinux(t *testing.T) {
 	tcpPivotExe(t, "linux", "amd64", false)
 }
 
+func TestSliverSharedLibraryLinux(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		multiLibrary(t, "linux", "amd64", true)
+		multiLibrary(t, "linux", "amd64", false)
+		multiLibrary(t, "linux", "386", true)
+		multiLibrary(t, "linux", "386", false)
+	}
+}
+
 func TestSliverExecutableDarwin(t *testing.T) {
 	multiExe(t, "darwin", "amd64", true)
 	multiExe(t, "darwin", "amd64", false)
 	tcpPivotExe(t, "darwin", "amd64", false)
 }
 
-// func TestSymbolObfuscation(t *testing.T) {
-// 	symbolObfuscation(t, "windows", "amd64")
-// }
+func TestSliverDefaultBuild(t *testing.T) {
+	mtlsExe(t, "linux", "arm", true)
+	mtlsExe(t, "linux", "arm", false)
+	httpExe(t, "freebsd", "amd64", false)
+	httpExe(t, "freebsd", "amd64", true)
+	dnsExe(t, "plan9", "amd64", false)
+	dnsExe(t, "plan9", "amd64", true)
+}
+
+func TestSymbolObfuscation(t *testing.T) {
+
+	// Supported platforms
+	symbolObfuscation(t, "windows", "amd64")
+	symbolObfuscation(t, "linux", "amd64")
+	symbolObfuscation(t, "linux", "386")
+	symbolObfuscation(t, "darwin", "amd64")
+	symbolObfuscation(t, "darwin", "arm64")
+
+	// Test an "unsupported" platform
+	symbolObfuscation(t, "freebsd", "amd64")
+}
 
 func mtlsExe(t *testing.T, goos string, goarch string, debug bool) {
 	t.Logf("[mtls] EXE %s/%s - debug: %v", goos, goarch, debug)
@@ -166,6 +197,34 @@ func multiExe(t *testing.T, goos string, goarch string, debug bool) {
 			{URL: "mtls://2.example.com", Options: "asdf"},
 			{URL: "https://3.example.com"},
 			{Priority: 3, URL: "dns://4.example.com"},
+			{Priority: 4, URL: "wg://5.example.com"},
+		},
+		MTLSc2Enabled:    true,
+		HTTPc2Enabled:    true,
+		DNSc2Enabled:     true,
+		WGc2Enabled:      true,
+		Debug:            debug,
+		ObfuscateSymbols: false,
+	}
+	nonce++
+	_, err := SliverExecutable(fmt.Sprintf("multi_test%d", nonce), config)
+	if err != nil {
+		t.Errorf(fmt.Sprintf("%v", err))
+	}
+}
+
+func multiWindowsService(t *testing.T, goos string, goarch string, debug bool) {
+	t.Logf("[multi] %s/%s - debug: %v", goos, goarch, debug)
+	config := &models.ImplantConfig{
+		GOOS:   goos,
+		GOARCH: goarch,
+		Format: clientpb.ImplantConfig_SERVICE,
+
+		C2: []models.ImplantC2{
+			{URL: "mtls://1.example.com"},
+			{URL: "mtls://2.example.com", Options: "asdf"},
+			{URL: "https://3.example.com"},
+			{Priority: 3, URL: "dns://4.example.com"},
 		},
 		MTLSc2Enabled:    true,
 		HTTPc2Enabled:    true,
@@ -174,7 +233,7 @@ func multiExe(t *testing.T, goos string, goarch string, debug bool) {
 		ObfuscateSymbols: false,
 	}
 	nonce++
-	_, err := SliverExecutable(fmt.Sprintf("multi_test%d", nonce), config)
+	_, err := SliverExecutable(fmt.Sprintf("service_test%d", nonce), config)
 	if err != nil {
 		t.Errorf(fmt.Sprintf("%v", err))
 	}
@@ -226,6 +285,35 @@ func namedPipeExe(t *testing.T, goos string, goarch string, debug bool) {
 	}
 }
 
+func wireguardExe(t *testing.T, goos string, goarch string, debug bool) {
+	t.Logf("[wireguard] EXE %s/%s - debug: %v", goos, goarch, debug)
+	config := &models.ImplantConfig{
+		GOOS:   goos,
+		GOARCH: goarch,
+		C2: []models.ImplantC2{
+			{
+				Priority: 1,
+				URL:      "wg://1.example.com:8000",
+				Options:  "asdf",
+			},
+		},
+		WGc2Enabled:       true,
+		Debug:             debug,
+		ObfuscateSymbols:  false,
+		WGImplantPrivKey:  "153be871d7e54545c01a9700880f86fc83087275669c9237b9bcd617ddbfa43f",
+		WGServerPubKey:    "153be871d7e54545c01a9700880f86fc83087275669c9237b9bcd617ddbfa43f",
+		WGPeerTunIP:       "100.64.0.2",
+		WGKeyExchangePort: 1234,
+		WGTcpCommsPort:    5678,
+	}
+	nonce++
+	certs.SetupWGKeys()
+	_, err := SliverExecutable(fmt.Sprintf("wireguard_test%d", nonce), config)
+	if err != nil {
+		t.Errorf(fmt.Sprintf("%v", err))
+	}
+}
+
 func multiLibrary(t *testing.T, goos string, goarch string, debug bool) {
 	t.Logf("[multi] LIB %s/%s - debug: %v", goos, goarch, debug)
 	config := &models.ImplantConfig{
@@ -237,12 +325,19 @@ func multiLibrary(t *testing.T, goos string, goarch string, debug bool) {
 			{Priority: 2, URL: "mtls://2.example.com"},
 			{URL: "https://3.example.com"},
 			{URL: "dns://4.example.com", Options: "asdf"},
+			{URL: "wg://5.example.com", Options: "asdf"},
 		},
 
-		Debug:            debug,
-		ObfuscateSymbols: false,
-		Format:           clientpb.ImplantConfig_SHARED_LIB,
-		IsSharedLib:      true,
+		Debug:             debug,
+		ObfuscateSymbols:  false,
+		Format:            clientpb.ImplantConfig_SHARED_LIB,
+		IsSharedLib:       true,
+		WGc2Enabled:       true,
+		WGImplantPrivKey:  "153be871d7e54545c01a9700880f86fc83087275669c9237b9bcd617ddbfa43f",
+		WGServerPubKey:    "153be871d7e54545c01a9700880f86fc83087275669c9237b9bcd617ddbfa43f",
+		WGPeerTunIP:       "100.64.0.2",
+		WGKeyExchangePort: 1234,
+		WGTcpCommsPort:    5678,
 	}
 	nonce++
 	_, err := SliverSharedLibrary(fmt.Sprintf("multilibrary_test%d", nonce), config)

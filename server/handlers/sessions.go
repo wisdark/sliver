@@ -23,11 +23,17 @@ package handlers
 */
 
 import (
+	"encoding/json"
+	"sync"
+
+	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
 	"github.com/bishopfox/sliver/server/core"
 	"github.com/bishopfox/sliver/server/log"
 
 	"github.com/golang/protobuf/proto"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -37,7 +43,10 @@ var (
 		sliverpb.MsgRegister:    registerSessionHandler,
 		sliverpb.MsgTunnelData:  tunnelDataHandler,
 		sliverpb.MsgTunnelClose: tunnelCloseHandler,
+		sliverpb.MsgPing:        pingHandler,
 	}
+
+	tunnelHandlerMutex = &sync.Mutex{}
 )
 
 // GetSessionHandlers - Returns a map of server-side msg handlers
@@ -62,14 +71,20 @@ func registerSessionHandler(session *core.Session, data []byte) {
 		return
 	}
 
-	handlerLog.Warnf("%v", session)
-	handlerLog.Warnf("%v", register)
-
 	if session.ID == 0 {
 		session.ID = core.NextSessionID()
 	}
+
+	// Parse Register UUID
+	sessionUUID, err := uuid.Parse(register.Uuid)
+	if err != nil {
+		// Generate Random UUID
+		sessionUUID = uuid.New()
+	}
+
 	session.Name = register.Name
 	session.Hostname = register.Hostname
+	session.UUID = sessionUUID.String()
 	session.Username = register.Username
 	session.UID = register.Uid
 	session.GID = register.Gid
@@ -80,10 +95,35 @@ func registerSessionHandler(session *core.Session, data []byte) {
 	session.ActiveC2 = register.ActiveC2
 	session.Version = register.Version
 	session.ReconnectInterval = register.ReconnectInterval
+	session.PollInterval = register.PollInterval
+	session.ProxyURL = register.ProxyURL
 	core.Sessions.Add(session)
+	go auditLogSession(session, register)
 }
 
+type auditLogNewSessionMsg struct {
+	Session  *clientpb.Session
+	Register *sliverpb.Register
+}
+
+func auditLogSession(session *core.Session, register *sliverpb.Register) {
+	msg, err := json.Marshal(auditLogNewSessionMsg{
+		Session:  session.ToProtobuf(),
+		Register: register,
+	})
+	if err != nil {
+		handlerLog.Errorf("Failed to log new session to audit log %s", err)
+	} else {
+		log.AuditLogger.Warn(string(msg))
+	}
+}
+
+// The handler mutex prevents a send on a closed channel, without it
+// two handlers calls may race when a tunnel is quickly created and closed.
 func tunnelDataHandler(session *core.Session, data []byte) {
+	tunnelHandlerMutex.Lock()
+	defer tunnelHandlerMutex.Unlock()
+
 	tunnelData := &sliverpb.TunnelData{}
 	proto.Unmarshal(data, tunnelData)
 	tunnel := core.Tunnels.Get(tunnelData.TunnelID)
@@ -99,6 +139,9 @@ func tunnelDataHandler(session *core.Session, data []byte) {
 }
 
 func tunnelCloseHandler(session *core.Session, data []byte) {
+	tunnelHandlerMutex.Lock()
+	defer tunnelHandlerMutex.Unlock()
+
 	tunnelData := &sliverpb.TunnelData{}
 	proto.Unmarshal(data, tunnelData)
 	if !tunnelData.Closed {
@@ -115,4 +158,8 @@ func tunnelCloseHandler(session *core.Session, data []byte) {
 	} else {
 		handlerLog.Warnf("Close sent on nil tunnel %d", tunnelData.TunnelID)
 	}
+}
+
+func pingHandler(session *core.Session, data []byte) {
+	handlerLog.Infof("ping from session %d", session.ID)
 }

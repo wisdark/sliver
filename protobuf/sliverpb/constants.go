@@ -106,6 +106,8 @@ const (
 	MsgInvokeGetSystemReq
 	// MsgGetSystem - Response to getsystem request
 	MsgGetSystem
+	// MsgInvokeExecuteAssemblyReq - Request to load and execute a .NET assembly
+	MsgInvokeExecuteAssemblyReq
 	// MsgExecuteAssemblyReq - Request to load and execute a .NET assembly
 	MsgExecuteAssemblyReq
 	// MsgExecuteAssembly - Output of the assembly execution
@@ -155,6 +157,8 @@ const (
 	MsgTCPPivotReq
 	// MsgTCPPivot - Response with the result
 	MsgTCPPivot
+	// MsgPivotListReq
+	MsgPivotListReq
 
 	// MsgPivotOpen - Request to create a new pivot tunnel
 	MsgPivotOpen
@@ -178,6 +182,49 @@ const (
 	MsgEnvReq
 	// MsgEnvInfo - Response to environment variable request
 	MsgEnvInfo
+	// MsgSetEnvReq
+	MsgSetEnvReq
+	// MsgSetEnv
+	MsgSetEnv
+	// MsgExecuteTokenReq - Execute request executed with the current (Windows) token
+	MsgExecuteTokenReq
+	// MsgRegistryReadReq
+	MsgRegistryReadReq
+	// MsgRegistryWriteReq
+	MsgRegistryWriteReq
+	// MsgRegistryCreateKeyReq
+	MsgRegistryCreateKeyReq
+
+	// MsgWGStartPortFwdReq - Request to start a port forwarding in a WG transport
+	MsgWGStartPortFwdReq
+	// MsgWGStopPortFwdReq - Request to stop a port forwarding in a WG transport
+	MsgWGStopPortFwdReq
+	// MsgWGStartSocks - Request to start a socks server in a WG transport
+	MsgWGStartSocksReq
+	// MsgWGStopSocks - Request to stop a socks server in a WG transport
+	MsgWGStopSocksReq
+	// MsgWGListForwarders
+	MsgWGListForwardersReq
+	// MsgWGListSocks
+	MsgWGListSocksReq
+
+	// MsgPortfwdReq - Establish a port forward
+	MsgPortfwdReq
+	// MsgPortfwd - Response of port forward
+	MsgPortfwd
+
+	// MsgReconnectIntervalReq
+	MsgReconnectIntervalReq
+
+	MsgReconnectInterval
+
+	// MsgPollIntervalReq
+	MsgPollIntervalReq
+
+	MsgPollInterval
+
+	// MsgUnsetEnvReq
+	MsgUnsetEnvReq
 )
 
 // MsgNumber - Get a message number of type
@@ -266,8 +313,14 @@ func MsgNumber(request proto.Message) uint32 {
 
 	case *ExecuteAssemblyReq:
 		return MsgExecuteAssemblyReq
+
+	case *InvokeExecuteAssemblyReq:
+		return MsgInvokeExecuteAssemblyReq
+
 	case *ExecuteAssembly:
 		return MsgExecuteAssembly
+	case *ExecuteTokenReq:
+		return MsgExecuteTokenReq
 
 	case *InvokeMigrateReq:
 		return MsgInvokeMigrateReq
@@ -334,6 +387,51 @@ func MsgNumber(request proto.Message) uint32 {
 		return MsgEnvReq
 	case *EnvInfo:
 		return MsgEnvInfo
+	case *SetEnvReq:
+		return MsgSetEnvReq
+	case *SetEnv:
+		return MsgSetEnv
+	case *UnsetEnvReq:
+		return MsgUnsetEnvReq
+	case *RegistryReadReq:
+		return MsgRegistryReadReq
+	case *RegistryWriteReq:
+		return MsgRegistryWriteReq
+	case *RegistryCreateKeyReq:
+		return MsgRegistryCreateKeyReq
+
+	case *PivotListReq:
+		return MsgPivotListReq
+
+	case *WGPortForwardStartReq:
+		return MsgWGStartPortFwdReq
+	case *WGPortForwardStopReq:
+		return MsgWGStopPortFwdReq
+	case *WGSocksStartReq:
+		return MsgWGStartSocksReq
+	case *WGSocksStopReq:
+		return MsgWGStopSocksReq
+	case *WGTCPForwardersReq:
+		return MsgWGListForwardersReq
+	case *WGSocksServersReq:
+		return MsgWGListSocksReq
+
+	case *PortfwdReq:
+		return MsgPortfwdReq
+	case *Portfwd:
+		return MsgPortfwd
+
+	case *ReconnectIntervalReq:
+		return MsgReconnectIntervalReq
+
+	case *ReconnectInterval:
+		return MsgReconnectInterval
+
+	case *PollIntervalReq:
+		return MsgPollIntervalReq
+
+	case *PollInterval:
+		return MsgPollInterval
 
 	}
 	return uint32(0)

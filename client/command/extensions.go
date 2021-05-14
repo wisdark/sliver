@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	consts "github.com/bishopfox/sliver/client/constants"
@@ -166,8 +167,10 @@ func load(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 			},
 			Flags: func(f *grumble.Flags) {
 				if extCmd.IsAssembly {
-					f.Bool("a", "amsi", false, "use AMSI bypass (disabled by default)")
-					f.Bool("e", "etw", false, "patch EtwEventWrite function to avoid detection (disabled by default)")
+					f.String("m", "method", "", "Optional method (a method is required for a .NET DLL)")
+					f.String("c", "class", "", "Optional class name (required for .NET DLL)")
+					f.String("d", "app-domain", "", "AppDomain name to create for .NET assembly. Generated randomly if not set.")
+					f.String("a", "arch", "x84", "Assembly target architecture: x86, x64, x84 (x86+x64)")
 				}
 				f.String("p", "process", "", "Path to process to host the shared object")
 				f.Bool("s", "save", false, "Save output to disk")
@@ -221,7 +224,10 @@ func runExtensionCommand(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 			return
 		}
 	}
-
+	isDLL := false
+	if filepath.Ext(binPath) == ".dll" {
+		isDLL = true
+	}
 	binData, err := ioutil.ReadFile(binPath)
 	if err != nil {
 		fmt.Printf(Warn+"%s", err.Error())
@@ -237,12 +243,15 @@ func runExtensionCommand(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 		msg := fmt.Sprintf("Executing %s %s ...", ctx.Command.Name, args)
 		go spin.Until(msg, ctrl)
 		executeAssemblyResp, err := rpc.ExecuteAssembly(context.Background(), &sliverpb.ExecuteAssemblyReq{
-			Request:    ActiveSession.Request(ctx),
-			AmsiBypass: ctx.Flags.Bool("amsi"),
-			EtwBypass:  ctx.Flags.Bool("etw"),
-			Arguments:  args,
-			Assembly:   binData,
-			Process:    processName,
+			Request:   ActiveSession.Request(ctx),
+			IsDLL:     isDLL,
+			Process:   processName,
+			Arguments: args,
+			Assembly:  binData,
+			Arch:      ctx.Flags.String("arch"),
+			Method:    ctx.Flags.String("method"),
+			ClassName: ctx.Flags.String("class"),
+			AppDomain: ctx.Flags.String("app-domain"),
 		})
 		ctrl <- true
 		<-ctrl
@@ -256,20 +265,16 @@ func runExtensionCommand(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 			fmt.Printf(Info+"Output saved to %s\n", outFilePath.Name())
 		}
 	} else if c.IsReflective {
-		offset, err := getExportOffset(binPath, c.Entrypoint)
-		if err != nil {
-			fmt.Printf(Warn+"Error: %v\n", err)
-			return
-		}
 		ctrl := make(chan bool)
 		msg := fmt.Sprintf("Executing %s %s ...", ctx.Command.Name, args)
 		go spin.Until(msg, ctrl)
-		spawnDllResp, err := rpc.SpawnDll(context.Background(), &sliverpb.SpawnDllReq{
+		spawnDllResp, err := rpc.SpawnDll(context.Background(), &sliverpb.InvokeSpawnDllReq{
 			Request:     ActiveSession.Request(ctx),
 			Args:        strings.Trim(args, " "),
 			Data:        binData,
 			ProcessName: processName,
-			Offset:      offset,
+			EntryPoint:  c.Entrypoint,
+			Kill:        true,
 		})
 		ctrl <- true
 		<-ctrl
@@ -294,6 +299,7 @@ func runExtensionCommand(ctx *grumble.Context, rpc rpcpb.SliverRPCClient) {
 			Data:        binData,
 			EntryPoint:  entryPoint,
 			ProcessName: processName,
+			Kill:        true,
 		})
 		ctrl <- true
 		<-ctrl

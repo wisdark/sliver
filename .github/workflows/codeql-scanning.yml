@@ -15,13 +15,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       # Setup go environment
-      - name: Go 1.15
-        uses: actions/setup-go@v1
+      - name: Go 1.16
+        uses: actions/setup-go@v2
         with:
-          go-version: 1.15
-        id: go
+          go-version: "^1.16"
 
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -32,13 +30,7 @@ jobs:
           if: ${{ github.event_name == 'pull_request' }}
           fetch-depth: 2
 
-      # If this run was triggered by a pull request event then checkout
-      # the head of the pull request instead of the merge commit.
-      # Only include this step if you are running this workflow on pull requests.
-      - run: git checkout HEAD^2
-        if: ${{ github.event_name == 'pull_request' }}
-
-      - name: OS Packages 
+      - name: OS Packages
         run: |
           sudo apt-get update --fix-missing && sudo apt-get -y install \
           git build-essential zlib1g zlib1g-dev wget zip unzip \
@@ -61,9 +53,6 @@ jobs:
           && cd protobuf-${PROTOC_GEN_GO_VER} \
           && make install
 
-      - name: Packr
-        run: go get -u github.com/gobuffalo/packr/packr
-
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
 
@@ -75,15 +64,13 @@ jobs:
         uses: github/codeql-action/init@v1
         with:
           config-file: ./.github/codeql/codeql-config.yml
-          languages: go 
-
-      # Setup os PATH to include protoc-gen-go and packr
-      - name: Update PATH
-        run: echo "/home/runner/go/bin/" >> $GITHUB_PATH
+          languages: go
 
       # Build the server ... is this necessary though?
       - run: |
-         make linux
+          make linux
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v1
+        env:
+          VERSION: ${{github.sha}}

@@ -134,7 +134,7 @@ func eventLoop(app *grumble.App, rpc rpcpb.SliverRPCClient) {
 		case consts.JoinedEvent:
 			fmt.Printf(clearln+Info+"%s has joined the game\n\n", event.Client.Operator.Name)
 		case consts.LeftEvent:
-			fmt.Printf(clearln+Info+"%s left the game\n\n", event.Client.Operator)
+			fmt.Printf(clearln+Info+"%s left the game\n\n", event.Client.Operator.Name)
 
 		case consts.JobStoppedEvent:
 			job := event.Job
@@ -201,7 +201,7 @@ func printLogo(sliverApp *grumble.App, rpc rpcpb.SliverRPCClient) {
 	fmt.Println("All hackers gain " + abilities[insecureRand.Intn(len(abilities))])
 	fmt.Printf(Info+"Server v%s - %s%s\n", serverSemVer, serverVer.Commit, dirty)
 	if version.GitCommit != serverVer.Commit {
-		fmt.Printf(Info+"Client v%s\n", version.FullVersion())
+		fmt.Printf(Info+"Client %s\n", version.FullVersion())
 	}
 	fmt.Println(Info + "Welcome to the sliver shell, please type 'help' for options")
 	fmt.Println()
@@ -283,5 +283,14 @@ var asciiLogos = []string{
     ╚════██║██║     ██║╚██╗ ██╔╝██╔══╝  ██╔══██╗
     ███████║███████╗██║ ╚████╔╝ ███████╗██║  ██║
     ╚══════╝╚══════╝╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝
+` + normal,
+
+	bold + gray + `
+.------..------..------..------..------..------.
+|S.--. ||L.--. ||I.--. ||V.--. ||E.--. ||R.--. |
+| :/\: || :/\: || (\/) || :(): || (\/) || :(): |
+| :\/: || (__) || :\/: || ()() || :\/: || ()() |
+| '--'S|| '--'L|| '--'I|| '--'V|| '--'E|| '--'R|
+` + "`------'`------'`------'`------'`------'`------'" + `
 ` + normal,
 }

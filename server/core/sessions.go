@@ -52,6 +52,7 @@ type Session struct {
 	Name              string
 	Hostname          string
 	Username          string
+	UUID              string
 	UID               string
 	GID               string
 	Os                string
@@ -68,6 +69,8 @@ type Session struct {
 	ActiveC2          string
 	IsDead            bool
 	ReconnectInterval uint32
+	ProxyURL          string
+	PollInterval      uint32
 }
 
 // ToProtobuf - Get the protobuf version of the object
@@ -84,7 +87,7 @@ func (s *Session) ToProtobuf() *clientpb.Session {
 		// If it hasn't checked in, flag it as DEAD.
 		var timePassed = uint32(math.Abs(s.LastCheckin.Sub(time.Now()).Seconds()))
 
-		if timePassed > (s.ReconnectInterval + 10) {
+		if timePassed > (s.ReconnectInterval+10) && timePassed > (s.PollInterval+10) {
 			isDead = true
 		} else {
 			isDead = false
@@ -96,6 +99,7 @@ func (s *Session) ToProtobuf() *clientpb.Session {
 		Name:              s.Name,
 		Hostname:          s.Hostname,
 		Username:          s.Username,
+		UUID:              s.UUID,
 		UID:               s.UID,
 		GID:               s.GID,
 		OS:                s.Os,
@@ -109,6 +113,8 @@ func (s *Session) ToProtobuf() *clientpb.Session {
 		ActiveC2:          s.ActiveC2,
 		IsDead:            isDead,
 		ReconnectInterval: s.ReconnectInterval,
+		ProxyURL:          s.ProxyURL,
+		PollInterval:      s.PollInterval,
 	}
 }
 
