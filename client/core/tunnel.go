@@ -32,7 +32,7 @@ func (t *tunnels) Get(tunnelID uint64) *Tunnel {
 }
 
 // Start - Add a tunnel to the core mapper
-func (t *tunnels) Start(tunnelID uint64, sessionID uint32) *Tunnel {
+func (t *tunnels) Start(tunnelID uint64, sessionID string) *Tunnel {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	tunnel := &Tunnel{
@@ -75,7 +75,7 @@ func (t *tunnels) Close(tunnelID uint64) {
 type Tunnel struct {
 	ID        uint64
 	IsOpen    bool
-	SessionID uint32
+	SessionID string
 
 	Send chan []byte
 	Recv chan []byte
@@ -99,11 +99,9 @@ func (tun *Tunnel) Read(data []byte) (int, error) {
 		log.Printf("Warning: Read on closed tunnel %d", tun.ID)
 		return 0, io.EOF
 	}
-	select {
-	case data := <-tun.Recv:
-		log.Printf("Read %d bytes", len(data))
-		buff.Write(data)
-	}
+	recvData := <-tun.Recv
+	log.Printf("Read %d bytes", len(recvData))
+	buff.Write(recvData)
 	n := copy(data, buff.Bytes())
 	return n, nil
 }

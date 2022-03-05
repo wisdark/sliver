@@ -45,12 +45,19 @@ func printHelp(con *console.SliverConsoleClient) {
 	groups := make(map[string]*grumble.Commands)
 	for _, c := range con.App.Commands().All() {
 		key := c.HelpGroup
-		if con.ActiveSession.Get() != nil {
-			if con.ActiveSession.Get().GetOS() != "windows" && key == consts.SliverWinHelpGroup {
+		targetOS := ""
+		session, beacon := con.ActiveTarget.Get()
+		if session != nil {
+			targetOS = session.OS
+		} else if beacon != nil {
+			targetOS = beacon.OS
+		}
+		if beacon != nil || session != nil {
+			if targetOS != "windows" && key == consts.SliverWinHelpGroup {
 				continue
 			}
 		} else {
-			if key == consts.SliverHelpGroup || key == consts.SliverWinHelpGroup || key == consts.ExtensionHelpGroup {
+			if key == consts.SliverHelpGroup || key == consts.SliverWinHelpGroup || key == consts.AliasHelpGroup || key == consts.ExtensionHelpGroup {
 				continue
 			}
 		}
@@ -90,8 +97,13 @@ func printHelp(con *console.SliverConsoleClient) {
 			con.Println()
 			printHeadline(con.App.Config(), headline, con)
 			con.Printf("%s\n", columnize.Format(output, config))
+			con.Println()
 		}
 	}
+
+	con.Println()
+	con.Printf("For even more information, please see our wiki: https://github.com/BishopFox/sliver/wiki\n")
+	con.Println()
 }
 
 func headlinePrinter(c *grumble.Config, con *console.SliverConsoleClient) func(v ...interface{}) (int, error) {

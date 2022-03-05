@@ -17,7 +17,7 @@ package command
 	You should have received a copy of the GNU General Public License
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-	---
+	---------------------------------------------------------------------
 	This file contains all of the code that binds a given string/flags/etc. to a
 	command implementation function.
 
@@ -36,7 +36,12 @@ package command
 import (
 	"os"
 
+	"github.com/bishopfox/sliver/client/assets"
+	"github.com/bishopfox/sliver/client/command/alias"
+	"github.com/bishopfox/sliver/client/command/armory"
 	"github.com/bishopfox/sliver/client/command/backdoor"
+	"github.com/bishopfox/sliver/client/command/beacons"
+	"github.com/bishopfox/sliver/client/command/completers"
 	"github.com/bishopfox/sliver/client/command/dllhijack"
 	"github.com/bishopfox/sliver/client/command/environment"
 	"github.com/bishopfox/sliver/client/command/exec"
@@ -44,22 +49,30 @@ import (
 	"github.com/bishopfox/sliver/client/command/filesystem"
 	"github.com/bishopfox/sliver/client/command/generate"
 	"github.com/bishopfox/sliver/client/command/help"
+	"github.com/bishopfox/sliver/client/command/hosts"
 	"github.com/bishopfox/sliver/client/command/info"
 	"github.com/bishopfox/sliver/client/command/jobs"
+	"github.com/bishopfox/sliver/client/command/kill"
 	"github.com/bishopfox/sliver/client/command/loot"
 	"github.com/bishopfox/sliver/client/command/monitor"
 	"github.com/bishopfox/sliver/client/command/network"
 	"github.com/bishopfox/sliver/client/command/operators"
 	"github.com/bishopfox/sliver/client/command/pivots"
 	"github.com/bishopfox/sliver/client/command/portfwd"
+	operator "github.com/bishopfox/sliver/client/command/prelude-operator"
 	"github.com/bishopfox/sliver/client/command/privilege"
 	"github.com/bishopfox/sliver/client/command/processes"
 	"github.com/bishopfox/sliver/client/command/reaction"
+	"github.com/bishopfox/sliver/client/command/reconfig"
 	"github.com/bishopfox/sliver/client/command/registry"
 	"github.com/bishopfox/sliver/client/command/screenshot"
 	"github.com/bishopfox/sliver/client/command/sessions"
+	"github.com/bishopfox/sliver/client/command/settings"
 	"github.com/bishopfox/sliver/client/command/shell"
+	"github.com/bishopfox/sliver/client/command/socks"
+	"github.com/bishopfox/sliver/client/command/tasks"
 	"github.com/bishopfox/sliver/client/command/update"
+	"github.com/bishopfox/sliver/client/command/use"
 	"github.com/bishopfox/sliver/client/command/websites"
 	"github.com/bishopfox/sliver/client/command/wireguard"
 	"github.com/bishopfox/sliver/client/console"
@@ -75,6 +88,7 @@ const (
 // BindCommands - Bind commands to a App
 func BindCommands(con *console.SliverConsoleClient) {
 
+	// Load Reactions
 	n, err := reaction.LoadReactions()
 	if err != nil && !os.IsNotExist(err) {
 		con.PrintErrorf("Failed to load reactions: %s\n", err)
@@ -82,7 +96,197 @@ func BindCommands(con *console.SliverConsoleClient) {
 		con.PrintInfof("Loaded %d reaction(s) from disk\n", n)
 	}
 
+	// Load Aliases
+	aliasManifests := assets.GetInstalledAliasManifests()
+	n = 0
+	for _, manifest := range aliasManifests {
+		_, err = alias.LoadAlias(manifest, con)
+		if err != nil {
+			con.PrintErrorf("Failed to load alias: %s\n", err)
+			continue
+		}
+		n++
+	}
+	if 0 < n {
+		if n == 1 {
+			con.PrintInfof("Loaded %d alias from disk\n", n)
+		} else {
+			con.PrintInfof("Loaded %d aliases from disk\n", n)
+		}
+	}
+
+	// Load Extensions
+	extensionManifests := assets.GetInstalledExtensionManifests()
+	n = 0
+	for _, manifest := range extensionManifests {
+		ext, err := extensions.LoadExtensionManifest(manifest)
+		// Absorb error in case there's no extensions manifest
+		if err != nil {
+			con.PrintErrorf("Failed to load extension: %s\n", err)
+			continue
+		}
+		extensions.ExtensionRegisterCommand(ext, con)
+		n++
+	}
+	if 0 < n {
+		con.PrintInfof("Loaded %d extension(s) from disk\n", n)
+	}
 	con.App.SetPrintHelp(help.HelpCmd(con)) // Responsible for display long-form help templates, etc.
+
+	// [ Aliases ] ---------------------------------------------
+
+	aliasCmd := &grumble.Command{
+		Name:     consts.AliasesStr,
+		Help:     "List current aliases",
+		LongHelp: help.GetHelpFor([]string{consts.AliasesStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			alias.AliasesCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	con.App.AddCommand(aliasCmd)
+
+	aliasCmd.AddCommand(&grumble.Command{
+		Name:     consts.LoadStr,
+		Help:     "Load a command alias",
+		LongHelp: help.GetHelpFor([]string{consts.AliasesStr, consts.LoadStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			alias.AliasesLoadCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("dir-path", "path to the alias directory")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return completers.LocalPathCompleter(prefix, args, con)
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+
+	aliasCmd.AddCommand(&grumble.Command{
+		Name:     consts.InstallStr,
+		Help:     "Install a command alias",
+		LongHelp: help.GetHelpFor([]string{consts.AliasesStr, consts.InstallStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			alias.AliasesInstallCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("path", "path to the alias directory or tar.gz file")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return completers.LocalPathCompleter(prefix, args, con)
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+
+	aliasCmd.AddCommand(&grumble.Command{
+		Name:     consts.RmStr,
+		Help:     "Remove an alias",
+		LongHelp: help.GetHelpFor([]string{consts.RmStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			alias.AliasesRemoveCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("name", "name of the alias to remove")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return alias.AliasCommandNameCompleter(prefix, args, con)
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+
+	// [ Armory ] ---------------------------------------------
+
+	armoryCmd := &grumble.Command{
+		Name:     consts.ArmoryStr,
+		Help:     "Automatically download and install extensions/aliases",
+		LongHelp: help.GetHelpFor([]string{consts.ArmoryStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Bool("I", "insecure", false, "skip tls certificate validation")
+			f.String("p", "proxy", "", "specify a proxy url (e.g. http://localhost:8080)")
+			f.Bool("c", "ignore-cache", false, "ignore metadata cache, force refresh")
+			f.String("t", "timeout", "15m", "download timeout")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			armory.ArmoryCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	con.App.AddCommand(armoryCmd)
+
+	armoryCmd.AddCommand(&grumble.Command{
+		Name:     consts.InstallStr,
+		Help:     "Install an alias or extension",
+		LongHelp: help.GetHelpFor([]string{consts.ArmoryStr, consts.InstallStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Bool("I", "insecure", false, "skip tls certificate validation")
+			f.String("p", "proxy", "", "specify a proxy url (e.g. http://localhost:8080)")
+			f.Bool("c", "ignore-cache", false, "ignore metadata cache, force refresh")
+			f.String("t", "timeout", "15m", "download timeout")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			armory.ArmoryInstallCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("name", "name of the extension or alias to install")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return armory.AliasExtensionOrBundleCompleter(prefix, args, con)
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+
+	armoryCmd.AddCommand(&grumble.Command{
+		Name:     consts.UpdateStr,
+		Help:     "Update installed an aliases and extensions",
+		LongHelp: help.GetHelpFor([]string{consts.ArmoryStr, consts.UpdateStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Bool("I", "insecure", false, "skip tls certificate validation")
+			f.String("p", "proxy", "", "specify a proxy url (e.g. http://localhost:8080)")
+			f.Bool("c", "ignore-cache", false, "ignore metadata cache, force refresh")
+			f.String("t", "timeout", "15m", "download timeout")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			armory.ArmoryUpdateCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+
+	armoryCmd.AddCommand(&grumble.Command{
+		Name:     consts.SearchStr,
+		Help:     "Search for aliases and extensions by name (regex)",
+		LongHelp: help.GetHelpFor([]string{consts.ArmoryStr, consts.SearchStr}),
+		Args: func(a *grumble.Args) {
+			a.String("name", "a name regular expression")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			armory.ArmorySearchCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
 
 	// [ Update ] --------------------------------------------------------------
 
@@ -173,8 +377,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.Int("l", "lport", generate.DefaultWGLPort, "udp listen port")
 			f.Int("n", "nport", generate.DefaultWGNPort, "virtual tun interface listen port")
 			f.Int("x", "key-port", generate.DefaultWGKeyExPort, "virtual tun interface key exchange port")
-			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 			f.Bool("p", "persistent", false, "make persistent across restarts")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
@@ -216,6 +421,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("w", "website", "", "website name (see websites cmd)")
 			f.String("L", "lhost", "", "interface to bind server to")
 			f.Int("l", "lport", generate.DefaultHTTPLPort, "tcp listen port")
+			f.Bool("D", "disable-otp", false, "disable otp authentication")
+			f.String("T", "long-poll-timeout", "1s", "server-side long poll timeout")
+			f.String("J", "long-poll-jitter", "2s", "server-side long poll jitter")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 			f.Bool("p", "persistent", false, "make persistent across restarts")
@@ -238,10 +446,12 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("w", "website", "", "website name (see websites cmd)")
 			f.String("L", "lhost", "", "interface to bind server to")
 			f.Int("l", "lport", generate.DefaultHTTPSLPort, "tcp listen port")
+			f.Bool("D", "disable-otp", false, "disable otp authentication")
+			f.String("T", "long-poll-timeout", "1s", "server-side long poll timeout")
+			f.String("J", "long-poll-jitter", "2s", "server-side long poll jitter")
 
 			f.String("c", "cert", "", "PEM encoded certificate file")
 			f.String("k", "key", "", "PEM encoded private key file")
-
 			f.Bool("e", "lets-encrypt", false, "attempt to provision a let's encrypt certificate")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
@@ -261,11 +471,13 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Help:     "Start a stager listener",
 		LongHelp: help.GetHelpFor([]string{consts.StageListenerStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("p", "profile", "", "Implant profile to link with the listener")
+			f.String("p", "profile", "", "implant profile name to link with the listener")
 			f.String("u", "url", "", "URL to which the stager will call back to")
 			f.String("c", "cert", "", "path to PEM encoded certificate file (HTTPS only)")
 			f.String("k", "key", "", "path to PEM encoded private key file (HTTPS only)")
 			f.Bool("e", "lets-encrypt", false, "attempt to provision a let's encrypt certificate (HTTPS only)")
+			f.StringL("aes-encrypt-key", "", "encrypt stage with AES encryption key")
+			f.StringL("aes-encrypt-iv", "", "encrypt stage with AES encyption iv")
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
@@ -279,9 +491,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 	// [ Operators ] --------------------------------------------------------------
 
 	con.App.AddCommand(&grumble.Command{
-		Name:     consts.PlayersStr,
+		Name:     consts.OperatorsStr,
 		Help:     "Manage operators",
-		LongHelp: help.GetHelpFor([]string{consts.PlayersStr}),
+		LongHelp: help.GetHelpFor([]string{consts.OperatorsStr}),
 		Flags: func(f *grumble.Flags) {
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
@@ -294,6 +506,47 @@ func BindCommands(con *console.SliverConsoleClient) {
 		HelpGroup: consts.MultiplayerHelpGroup,
 	})
 
+	// [ Reconfig ] ---------------------------------------------------------------
+
+	con.App.AddCommand(&grumble.Command{
+		Name:     consts.ReconfigStr,
+		Help:     "Reconfigure the active beacon/session",
+		LongHelp: help.GetHelpFor([]string{consts.ReconfigStr}),
+		Flags: func(f *grumble.Flags) {
+			f.String("n", "name", "", "change implant name to")
+			f.String("r", "reconnect-interval", "", "reconnect interval for implant")
+			f.String("i", "beacon-interval", "", "beacon callback interval")
+			f.String("j", "beacon-jitter", "", "beacon callback jitter (random up to)")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			reconfig.ReconfigCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	con.App.AddCommand(&grumble.Command{
+		Name:     consts.RenameStr,
+		Help:     "Rename the active beacon/session",
+		LongHelp: help.GetHelpFor([]string{consts.RenameStr}),
+		Flags: func(f *grumble.Flags) {
+			f.String("n", "name", "", "change implant name to")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			reconfig.RenameCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
 	// [ Sessions ] --------------------------------------------------------------
 
 	sessionsCmd := &grumble.Command{
@@ -301,10 +554,10 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Help:     "Session management",
 		LongHelp: help.GetHelpFor([]string{consts.SessionsStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("i", "interact", "", "interact with a sliver")
-			f.String("k", "kill", "", "Kill the designated session")
-			f.Bool("K", "kill-all", false, "Kill all the sessions")
-			f.Bool("C", "clean", false, "Clean out any sessions marked as [DEAD]")
+			f.String("i", "interact", "", "interact with a session")
+			f.String("k", "kill", "", "kill the designated session")
+			f.Bool("K", "kill-all", false, "kill all the sessions")
+			f.Bool("C", "clean", false, "clean out any sessions marked as [DEAD]")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
@@ -318,7 +571,7 @@ func BindCommands(con *console.SliverConsoleClient) {
 	}
 	sessionsCmd.AddCommand(&grumble.Command{
 		Name:     consts.PruneStr,
-		Help:     "Kill all stale sessions",
+		Help:     "Kill all stale/dead sessions",
 		LongHelp: help.GetHelpFor([]string{consts.SessionsStr, consts.PruneStr}),
 		Flags: func(f *grumble.Flags) {
 
@@ -333,26 +586,6 @@ func BindCommands(con *console.SliverConsoleClient) {
 		HelpGroup: consts.SliverHelpGroup,
 	})
 	con.App.AddCommand(sessionsCmd)
-
-	con.App.AddCommand(&grumble.Command{
-		Name:     consts.ReconfigStr,
-		Help:     "Reconfigure the active session",
-		LongHelp: help.GetHelpFor([]string{consts.SessionsStr, consts.ReconfigStr}),
-		Flags: func(f *grumble.Flags) {
-			f.String("n", "name", "", "agent name to change to")
-			f.Int("r", "reconnect", -1, "reconnect interval for agent")
-			f.Int("p", "poll", -1, "poll interval for agent")
-
-			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
-		},
-		Run: func(ctx *grumble.Context) error {
-			con.Println()
-			sessions.SessionsReconfigCmd(ctx, con)
-			con.Println()
-			return nil
-		},
-		HelpGroup: consts.SliverHelpGroup,
-	})
 
 	con.App.AddCommand(&grumble.Command{
 		Name:     consts.BackgroundStr,
@@ -371,31 +604,12 @@ func BindCommands(con *console.SliverConsoleClient) {
 	})
 
 	con.App.AddCommand(&grumble.Command{
-		Name:     consts.UseStr,
-		Help:     "Switch the active session",
-		LongHelp: help.GetHelpFor([]string{consts.UseStr}),
-		Flags: func(f *grumble.Flags) {
-			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
-		},
-		Args: func(a *grumble.Args) {
-			a.String("session", "session ID or name", grumble.Default(""))
-		},
-		Run: func(ctx *grumble.Context) error {
-			con.Println()
-			sessions.UseCmd(ctx, con)
-			con.Println()
-			return nil
-		},
-		HelpGroup: consts.GenericHelpGroup,
-	})
-
-	con.App.AddCommand(&grumble.Command{
 		Name:     consts.KillStr,
 		Help:     "Kill a session",
 		LongHelp: help.GetHelpFor([]string{consts.KillStr}),
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
-			sessions.KillCmd(ctx, con)
+			kill.KillCmd(ctx, con)
 			con.Println()
 			return nil
 		},
@@ -406,6 +620,242 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 		HelpGroup: consts.SliverHelpGroup,
 	})
+
+	openSessionCmd := &grumble.Command{
+		Name:     consts.InteractiveStr,
+		Help:     "Task a beacon to open an interactive session (Beacon only)",
+		LongHelp: help.GetHelpFor([]string{consts.InteractiveStr}),
+		Flags: func(f *grumble.Flags) {
+			f.String("m", "mtls", "", "mtls connection strings")
+			f.String("g", "wg", "", "wg connection strings")
+			f.String("b", "http", "", "http(s) connection strings")
+			f.String("n", "dns", "", "dns connection strings")
+			f.String("p", "named-pipe", "", "namedpipe connection strings")
+			f.String("i", "tcp-pivot", "", "tcppivot connection strings")
+
+			f.String("d", "delay", "0s", "delay opening the session (after checkin) for a given period of time")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			sessions.InteractiveCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	}
+	con.App.AddCommand(openSessionCmd)
+
+	// [ Close ] --------------------------------------------------------------
+	closeSessionCmd := &grumble.Command{
+		Name:     consts.CloseStr,
+		Help:     "Close an interactive session without killing the remote process",
+		LongHelp: help.GetHelpFor([]string{consts.CloseStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			sessions.CloseSessionCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	}
+	con.App.AddCommand(closeSessionCmd)
+
+	// [ Tasks ] --------------------------------------------------------------
+
+	tasksCmd := &grumble.Command{
+		Name:     consts.TasksStr,
+		Help:     "Beacon task management",
+		LongHelp: help.GetHelpFor([]string{consts.TasksStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Bool("O", "overflow", false, "overflow terminal width (display truncated rows)")
+			f.Int("S", "skip-pages", 0, "skip the first n page(s)")
+			f.String("f", "filter", "", "filter based on task type (case-insensitive prefix matching)")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			tasks.TasksCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	tasksCmd.AddCommand(&grumble.Command{
+		Name:     consts.FetchStr,
+		Help:     "Fetch the details of a beacon task",
+		LongHelp: help.GetHelpFor([]string{consts.TasksStr, consts.FetchStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Bool("O", "overflow", false, "overflow terminal width (display truncated rows)")
+			f.Int("S", "skip-pages", 0, "skip the first n page(s)")
+			f.String("f", "filter", "", "filter based on task type (case-insensitive prefix matching)")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+			a.String("id", "beacon task ID", grumble.Default(""))
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			tasks.TasksFetchCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	con.App.AddCommand(tasksCmd)
+
+	// [ Use ] --------------------------------------------------------------
+
+	useCmd := &grumble.Command{
+		Name:     consts.UseStr,
+		Help:     "Switch the active session or beacon",
+		LongHelp: help.GetHelpFor([]string{consts.UseStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+			a.String("id", "beacon or session ID", grumble.Default(""))
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			use.UseCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Completer: func(prefix string, args []string) []string {
+			return use.BeaconAndSessionIDCompleter(prefix, args, con)
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	useCmd.AddCommand(&grumble.Command{
+		Name:     consts.SessionsStr,
+		Help:     "Switch the active session",
+		LongHelp: help.GetHelpFor([]string{consts.UseStr, consts.SessionsStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			use.UseSessionCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	useCmd.AddCommand(&grumble.Command{
+		Name:     consts.BeaconsStr,
+		Help:     "Switch the active beacon",
+		LongHelp: help.GetHelpFor([]string{consts.UseStr, consts.BeaconsStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			use.UseBeaconCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	con.App.AddCommand(useCmd)
+
+	// [ Settings ] --------------------------------------------------------------
+
+	settingsCmd := &grumble.Command{
+		Name:     consts.SettingsStr,
+		Help:     "Manage client settings",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	settingsCmd.AddCommand(&grumble.Command{
+		Name:     consts.SaveStr,
+		Help:     "Save the current settings to disk",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr, consts.SaveStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsSaveCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	settingsCmd.AddCommand(&grumble.Command{
+		Name:     consts.TablesStr,
+		Help:     "Modify tables setting (style)",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr, consts.TablesStr}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsTablesCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	settingsCmd.AddCommand(&grumble.Command{
+		Name:     "beacon-autoresults",
+		Help:     "Automatically display beacon task results when completed",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr, "beacon-autoresults"}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsBeaconsAutoResultCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	settingsCmd.AddCommand(&grumble.Command{
+		Name:     "autoadult",
+		Help:     "Automatically accept OPSEC warnings",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr, "autoadult"}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsAutoAdultCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	settingsCmd.AddCommand(&grumble.Command{
+		Name:     "always-overflow",
+		Help:     "Disable table pagination",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr, "always-overflow"}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsAlwaysOverflow(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	settingsCmd.AddCommand(&grumble.Command{
+		Name:     "small-terminal",
+		Help:     "Set the small terminal width",
+		LongHelp: help.GetHelpFor([]string{consts.SettingsStr, "small-terminal"}),
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			settings.SettingsSmallTerm(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	con.App.AddCommand(settingsCmd)
 
 	// [ Info ] --------------------------------------------------------------
 
@@ -537,8 +987,11 @@ func BindCommands(con *console.SliverConsoleClient) {
 		LongHelp: help.GetHelpFor([]string{consts.ExecuteStr}),
 		Flags: func(f *grumble.Flags) {
 			f.Bool("T", "token", false, "execute command with current token (windows only)")
-			f.Bool("s", "silent", false, "don't print the command output")
+			f.Bool("o", "output", false, "capture command output")
 			f.Bool("X", "loot", false, "save output as loot")
+			f.Bool("S", "ignore-stderr", false, "don't print STDERR output")
+			f.String("O", "stdout", "", "remote path to redirect STDOUT to")
+			f.String("E", "stderr", "", "remote path to redirect STDERR to")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
@@ -601,6 +1054,7 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.Uint("p", "pid", 0, "Pid of process to inject into (0 means injection into ourselves)")
 			f.String("n", "process", `c:\windows\system32\notepad.exe`, "Process to inject into when running in interactive mode")
 			f.Bool("i", "interactive", false, "Inject into a new process and interact with it")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		HelpGroup: consts.SliverHelpGroup,
@@ -614,8 +1068,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("e", "entry-point", "", "Entrypoint for the DLL (Windows only)")
 			f.String("p", "process", `c:\windows\system32\notepad.exe`, "Path to process to host the shellcode")
 			f.Bool("s", "save", false, "save output to file")
-			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 			f.Bool("k", "keep-alive", false, "don't terminate host process once the execution completes")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Args: func(a *grumble.Args) {
 			a.String("filepath", "path the shared library file")
@@ -778,13 +1233,13 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("N", "name", "", "agent name")
 			f.Bool("d", "debug", false, "enable debug features")
 			f.Bool("e", "evasion", false, "enable evasion features")
-			f.Bool("b", "skip-symbols", false, "skip symbol obfuscation")
+			f.Bool("l", "skip-symbols", false, "skip symbol obfuscation")
 
 			f.String("c", "canary", "", "canary domain(s)")
 
 			f.String("m", "mtls", "", "mtls connection strings")
 			f.String("g", "wg", "", "wg connection strings")
-			f.String("H", "http", "", "http(s) connection strings")
+			f.String("b", "http", "", "http(s) connection strings")
 			f.String("n", "dns", "", "dns connection strings")
 			f.String("p", "named-pipe", "", "named-pipe connection strings")
 			f.String("i", "tcp-pivot", "", "tcp-pivot connection strings")
@@ -792,8 +1247,10 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.Int("X", "key-exchange", generate.DefaultWGKeyExPort, "wg key-exchange port")
 			f.Int("T", "tcp-comms", generate.DefaultWGNPort, "wg c2 comms port")
 
+			f.Bool("R", "run-at-load", false, "run the implant entrypoint from DllMain/Constructor (shared library only)")
+
 			f.Int("j", "reconnect", generate.DefaultReconnect, "attempt to reconnect every n second(s)")
-			f.Int("P", "poll", generate.DefaultPoll, "attempt to poll every n second(s)")
+			f.Int("P", "poll-timeout", generate.DefaultPollTimeout, "long poll request timeout")
 			f.Int("k", "max-errors", generate.DefaultMaxErrors, "max number of connection errors")
 
 			f.String("w", "limit-datetime", "", "limit execution to before datetime")
@@ -803,7 +1260,6 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("F", "limit-fileexists", "", "limit execution to hosts with this file in the filesystem")
 
 			f.String("f", "format", "exe", "Specifies the output formats, valid values are: 'exe', 'shared' (for dynamic libraries), 'service' (see `psexec` for more info) and 'shellcode' (windows only)")
-
 			f.String("s", "save", "", "directory/file to the binary to")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
@@ -817,8 +1273,63 @@ func BindCommands(con *console.SliverConsoleClient) {
 		HelpGroup: consts.GenericHelpGroup,
 	}
 	generateCmd.AddCommand(&grumble.Command{
+		Name:     consts.BeaconStr,
+		Help:     "Generate a beacon binary",
+		LongHelp: help.GetHelpFor([]string{consts.GenerateStr, consts.BeaconStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int64("D", "days", 0, "beacon interval days")
+			f.Int64("H", "hours", 0, "beacon interval hours")
+			f.Int64("M", "minutes", 0, "beacon interval minutes")
+			f.Int64("S", "seconds", 60, "beacon interval seconds")
+			f.Int64("J", "jitter", 30, "beacon interval jitter in seconds")
+
+			// Generate flags
+			f.String("o", "os", "windows", "operating system")
+			f.String("a", "arch", "amd64", "cpu architecture")
+			f.String("N", "name", "", "agent name")
+			f.Bool("d", "debug", false, "enable debug features")
+			f.Bool("e", "evasion", false, "enable evasion features")
+			f.Bool("l", "skip-symbols", false, "skip symbol obfuscation")
+
+			f.String("c", "canary", "", "canary domain(s)")
+
+			f.String("m", "mtls", "", "mtls connection strings")
+			f.String("g", "wg", "", "wg connection strings")
+			f.String("b", "http", "", "http(s) connection strings")
+			f.String("n", "dns", "", "dns connection strings")
+			f.String("p", "named-pipe", "", "named-pipe connection strings")
+			f.String("i", "tcp-pivot", "", "tcp-pivot connection strings")
+
+			f.Int("X", "key-exchange", generate.DefaultWGKeyExPort, "wg key-exchange port")
+			f.Int("T", "tcp-comms", generate.DefaultWGNPort, "wg c2 comms port")
+
+			f.Bool("R", "run-at-load", false, "run the implant entrypoint from DllMain/Constructor (shared library only)")
+
+			f.Int("j", "reconnect", generate.DefaultReconnect, "attempt to reconnect every n second(s)")
+			f.Int("P", "poll-timeout", generate.DefaultPollTimeout, "long poll request timeout")
+			f.Int("k", "max-errors", generate.DefaultMaxErrors, "max number of connection errors")
+
+			f.String("w", "limit-datetime", "", "limit execution to before datetime")
+			f.Bool("x", "limit-domainjoined", false, "limit execution to domain joined machines")
+			f.String("y", "limit-username", "", "limit execution to specified username")
+			f.String("z", "limit-hostname", "", "limit execution to specified hostname")
+			f.String("F", "limit-fileexists", "", "limit execution to hosts with this file in the filesystem")
+
+			f.String("f", "format", "exe", "Specifies the output formats, valid values are: 'exe', 'shared' (for dynamic libraries), 'service' (see `psexec` for more info) and 'shellcode' (windows only)")
+			f.String("s", "save", "", "directory/file to the binary to")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			generate.GenerateBeaconCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+	})
+	generateCmd.AddCommand(&grumble.Command{
 		Name:     consts.StagerStr,
-		Help:     "Generate a implant stager using MSF",
+		Help:     "Generate a stager using Metasploit (requires local Metasploit installation)",
 		LongHelp: help.GetHelpFor([]string{consts.StagerStr}),
 		Flags: func(f *grumble.Flags) {
 			f.String("o", "os", "windows", "operating system")
@@ -829,6 +1340,7 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("f", "format", "raw", "Output format (msfvenom formats, see `help generate stager` for the list)")
 			f.String("b", "badchars", "", "bytes to exclude from stage shellcode")
 			f.String("s", "save", "", "directory to save the generated stager to")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
@@ -840,9 +1352,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 		HelpGroup: consts.GenericHelpGroup,
 	})
 	generateCmd.AddCommand(&grumble.Command{
-		Name:     consts.CompilerStr,
+		Name:     consts.CompilerInfoStr,
 		Help:     "Get information about the server's compiler",
-		LongHelp: help.GetHelpFor([]string{consts.CompilerStr}),
+		LongHelp: help.GetHelpFor([]string{consts.CompilerInfoStr}),
 		Flags: func(f *grumble.Flags) {
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
@@ -897,10 +1409,15 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Help:     "Generate implant from a profile",
 		LongHelp: help.GetHelpFor([]string{consts.ProfilesStr, consts.GenerateStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("p", "name", "", "profile name")
 			f.String("s", "save", "", "directory/file to the binary to")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+			a.String("name", "name of the profile", grumble.Default(""))
+		},
+		Completer: func(prefix string, args []string) []string {
+			return generate.ProfileNameCompleter(prefix, args, con)
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
@@ -910,32 +1427,37 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 		HelpGroup: consts.GenericHelpGroup,
 	})
-	profilesCmd.AddCommand(&grumble.Command{
+	profilesNewCmd := &grumble.Command{
 		Name:     consts.NewStr,
-		Help:     "Save a new implant profile",
+		Help:     "Create a new implant profile (interactive session)",
 		LongHelp: help.GetHelpFor([]string{consts.ProfilesStr, consts.NewStr}),
 		Flags: func(f *grumble.Flags) {
+
+			// Generate flags
 			f.String("o", "os", "windows", "operating system")
 			f.String("a", "arch", "amd64", "cpu architecture")
+
 			f.Bool("d", "debug", false, "enable debug features")
 			f.Bool("e", "evasion", false, "enable evasion features")
-			f.Bool("s", "skip-symbols", false, "skip symbol obfuscation")
+			f.Bool("l", "skip-symbols", false, "skip symbol obfuscation")
 
-			f.String("m", "mtls", "", "mtls domain(s)")
-			f.String("g", "wg", "", "wg domain(s)")
-			f.String("H", "http", "", "http[s] domain(s)")
-			f.String("n", "dns", "", "dns domain(s)")
+			f.String("c", "canary", "", "canary domain(s)")
+
+			f.String("m", "mtls", "", "mtls connection strings")
+			f.String("g", "wg", "", "wg connection strings")
+			f.String("b", "http", "", "http(s) connection strings")
+			f.String("n", "dns", "", "dns connection strings")
 			f.String("p", "named-pipe", "", "named-pipe connection strings")
 			f.String("i", "tcp-pivot", "", "tcp-pivot connection strings")
 
 			f.Int("X", "key-exchange", generate.DefaultWGKeyExPort, "wg key-exchange port")
 			f.Int("T", "tcp-comms", generate.DefaultWGNPort, "wg c2 comms port")
 
-			f.String("c", "canary", "", "canary domain(s)")
+			f.Bool("R", "run-at-load", false, "run the implant entrypoint from DllMain/Constructor (shared library only)")
 
 			f.Int("j", "reconnect", generate.DefaultReconnect, "attempt to reconnect every n second(s)")
+			f.Int("P", "poll-timeout", generate.DefaultPollTimeout, "long poll request timeout")
 			f.Int("k", "max-errors", generate.DefaultMaxErrors, "max number of connection errors")
-			f.Int("P", "poll", generate.DefaultPoll, "attempt to poll every n second(s)")
 
 			f.String("w", "limit-datetime", "", "limit execution to before datetime")
 			f.Bool("x", "limit-domainjoined", false, "limit execution to domain joined machines")
@@ -945,9 +1467,10 @@ func BindCommands(con *console.SliverConsoleClient) {
 
 			f.String("f", "format", "exe", "Specifies the output formats, valid values are: 'exe', 'shared' (for dynamic libraries), 'service' (see `psexec` for more info) and 'shellcode' (windows only)")
 
-			f.String("N", "profile-name", "", "profile name")
-
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+			a.String("name", "name of the profile", grumble.Default(""))
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
@@ -956,7 +1479,69 @@ func BindCommands(con *console.SliverConsoleClient) {
 			return nil
 		},
 		HelpGroup: consts.GenericHelpGroup,
+	}
+	profilesCmd.AddCommand(profilesNewCmd)
+
+	// New Beacon Profile Command
+	profilesNewCmd.AddCommand(&grumble.Command{
+		Name:     consts.BeaconStr,
+		Help:     "Create a new implant profile (beacon)",
+		LongHelp: help.GetHelpFor([]string{consts.ProfilesStr, consts.NewStr, consts.BeaconStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int64("D", "days", 0, "beacon interval days")
+			f.Int64("H", "hours", 0, "beacon interval hours")
+			f.Int64("M", "minutes", 0, "beacon interval minutes")
+			f.Int64("S", "seconds", 60, "beacon interval seconds")
+			f.Int64("J", "jitter", 30, "beacon interval jitter in seconds")
+
+			// Generate flags
+			f.String("o", "os", "windows", "operating system")
+			f.String("a", "arch", "amd64", "cpu architecture")
+
+			f.Bool("d", "debug", false, "enable debug features")
+			f.Bool("e", "evasion", false, "enable evasion features")
+			f.Bool("l", "skip-symbols", false, "skip symbol obfuscation")
+
+			f.String("c", "canary", "", "canary domain(s)")
+
+			f.String("m", "mtls", "", "mtls connection strings")
+			f.String("g", "wg", "", "wg connection strings")
+			f.String("b", "http", "", "http(s) connection strings")
+			f.String("n", "dns", "", "dns connection strings")
+			f.String("p", "named-pipe", "", "named-pipe connection strings")
+			f.String("i", "tcp-pivot", "", "tcp-pivot connection strings")
+
+			f.Int("X", "key-exchange", generate.DefaultWGKeyExPort, "wg key-exchange port")
+			f.Int("T", "tcp-comms", generate.DefaultWGNPort, "wg c2 comms port")
+
+			f.Bool("R", "run-at-load", false, "run the implant entrypoint from DllMain/Constructor (shared library only)")
+
+			f.Int("j", "reconnect", generate.DefaultReconnect, "attempt to reconnect every n second(s)")
+			f.Int("P", "poll-timeout", generate.DefaultPollTimeout, "long poll request timeout")
+			f.Int("k", "max-errors", generate.DefaultMaxErrors, "max number of connection errors")
+
+			f.String("w", "limit-datetime", "", "limit execution to before datetime")
+			f.Bool("x", "limit-domainjoined", false, "limit execution to domain joined machines")
+			f.String("y", "limit-username", "", "limit execution to specified username")
+			f.String("z", "limit-hostname", "", "limit execution to specified hostname")
+			f.String("F", "limit-fileexists", "", "limit execution to hosts with this file in the filesystem")
+
+			f.String("f", "format", "exe", "Specifies the output formats, valid values are: 'exe', 'shared' (for dynamic libraries), 'service' (see `psexec` for more info) and 'shellcode' (windows only)")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Args: func(a *grumble.Args) {
+			a.String("name", "name of the profile", grumble.Default(""))
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			generate.ProfilesNewBeaconCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
 	})
+
 	profilesCmd.AddCommand(&grumble.Command{
 		Name:     consts.RmStr,
 		Help:     "Remove a profile",
@@ -965,7 +1550,10 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Args: func(a *grumble.Args) {
-			a.String("profile-name", "name of the profile")
+			a.String("name", "name of the profile", grumble.Default(""))
+		},
+		Completer: func(prefix string, args []string) []string {
+			return generate.ProfileNameCompleter(prefix, args, con)
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
@@ -982,6 +1570,13 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Help:     "List implant builds",
 		LongHelp: help.GetHelpFor([]string{consts.ImplantBuildsStr}),
 		Flags: func(f *grumble.Flags) {
+			f.String("o", "os", "", "filter builds by operating system")
+			f.String("a", "arch", "", "filter builds by cpu architecture")
+			f.String("f", "format", "", "filter builds by artifact format")
+			f.Bool("s", "only-sessions", false, "filter interactive sessions")
+			f.Bool("b", "only-beacons", false, "filter beacons")
+			f.Bool("d", "no-debug", false, "filter builds by debug flag")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
@@ -1000,7 +1595,10 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Args: func(a *grumble.Args) {
-			a.String("implant-name", "implant name")
+			a.String("name", "implant name", grumble.Default(""))
+		},
+		Completer: func(prefix string, args []string) []string {
+			return generate.ImplantBuildNameCompleter(prefix, args, generate.ImplantBuildFilter{}, con)
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
@@ -1013,9 +1611,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 	con.App.AddCommand(implantBuildsCmd)
 
 	con.App.AddCommand(&grumble.Command{
-		Name:     consts.ListCanariesStr,
+		Name:     consts.CanariesStr,
 		Help:     "List previously generated canaries",
-		LongHelp: help.GetHelpFor([]string{consts.ListCanariesStr}),
+		LongHelp: help.GetHelpFor([]string{consts.CanariesStr}),
 		Flags: func(f *grumble.Flags) {
 			f.Bool("b", "burned", false, "show only triggered/burned canaries")
 
@@ -1180,6 +1778,8 @@ func BindCommands(con *console.SliverConsoleClient) {
 		LongHelp: help.GetHelpFor([]string{consts.UploadStr}),
 		Flags: func(f *grumble.Flags) {
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+
+			f.Bool("i", "ioc", false, "track uploaded file as an ioc")
 		},
 		Args: func(a *grumble.Args) {
 			a.String("local-path", "local path to the file to upload")
@@ -1201,6 +1801,8 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Help:     "View network interface configurations",
 		LongHelp: help.GetHelpFor([]string{consts.IfconfigStr}),
 		Flags: func(f *grumble.Flags) {
+			f.Bool("A", "all", false, "show all network adapters (default only shows IPv4)")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
@@ -1244,6 +1846,8 @@ func BindCommands(con *console.SliverConsoleClient) {
 			f.String("e", "exe", "", "filter based on executable name")
 			f.String("o", "owner", "", "filter based on owner")
 			f.Bool("c", "print-cmdline", false, "print command line arguments")
+			f.Bool("O", "overflow", false, "overflow terminal width (display truncated rows)")
+			f.Int("S", "skip-pages", 0, "skip the first n page(s)")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
@@ -1263,6 +1867,8 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Flags: func(f *grumble.Flags) {
 			f.Int("p", "pid", -1, "target pid")
 			f.String("n", "name", "", "target process name")
+			f.String("s", "save", "", "save to file (will overwrite if exists)")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
@@ -1493,6 +2099,7 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Help:     "Take a screenshot",
 		LongHelp: help.GetHelpFor([]string{consts.ScreenshotStr}),
 		Flags: func(f *grumble.Flags) {
+			f.String("s", "save", "", "save to file (will overwrite if exists)")
 			f.Bool("X", "loot", false, "save output as loot")
 
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
@@ -1528,23 +2135,73 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 	})
 
-	// [ Extensions ] ---------------------------------------------
+	// [ Beacons ] ---------------------------------------------
 
-	con.App.AddCommand(&grumble.Command{
-		Name:     consts.LoadExtensionStr,
-		Help:     "Load a sliver extension",
-		LongHelp: help.GetHelpFor([]string{consts.LoadExtensionStr}),
+	beaconsCmd := &grumble.Command{
+		Name:     consts.BeaconsStr,
+		Help:     "Manage beacons",
+		LongHelp: help.GetHelpFor([]string{consts.BeaconsStr}),
+		Flags: func(f *grumble.Flags) {
+			f.String("k", "kill", "", "kill a beacon")
+			f.Bool("K", "kill-all", false, "kill all beacons")
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		HelpGroup: consts.GenericHelpGroup,
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
-			extensions.LoadExtensionCmd(ctx, con)
+			beacons.BeaconsCmd(ctx, con)
 			con.Println()
 			return nil
 		},
-		Args: func(a *grumble.Args) {
-			a.String("dir-path", "path to the extension directory")
+	}
+	beaconsCmd.AddCommand(&grumble.Command{
+		Name:     consts.RmStr,
+		Help:     "Remove a beacon",
+		LongHelp: help.GetHelpFor([]string{consts.BeaconsStr, consts.RmStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
-		HelpGroup: consts.GenericHelpGroup,
+		HelpGroup: consts.SliverWinHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			beacons.BeaconsRmCmd(ctx, con)
+			con.Println()
+			return nil
+		},
 	})
+	beaconsCmd.AddCommand(&grumble.Command{
+		Name:     consts.WatchStr,
+		Help:     "Watch your beacons",
+		LongHelp: help.GetHelpFor([]string{consts.BeaconsStr, consts.WatchStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		HelpGroup: consts.SliverWinHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			beacons.BeaconsWatchCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+	})
+	beaconsCmd.AddCommand(&grumble.Command{
+		Name:     consts.PruneStr,
+		Help:     "Prune stale beacons automatically",
+		LongHelp: help.GetHelpFor([]string{consts.BeaconsStr, consts.PruneStr}),
+		Flags: func(f *grumble.Flags) {
+			f.String("d", "duration", "1h", "duration to prune beacons that have missed their last checkin")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		HelpGroup: consts.SliverWinHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			beacons.BeaconsPruneCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+	})
+	con.App.AddCommand(beaconsCmd)
 
 	// [ Environment ] ---------------------------------------------
 
@@ -1694,6 +2351,25 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 	})
 	registryCmd.AddCommand(&grumble.Command{
+		Name:     consts.RegistryDeleteKeyStr,
+		Help:     "Remove a registry key",
+		LongHelp: help.GetHelpFor([]string{consts.RegistryDeleteKeyStr}),
+		Args: func(a *grumble.Args) {
+			a.String("registry-path", "registry path")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			registry.RegDeleteKeyCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+			f.String("H", "hive", "HKCU", "registry hive")
+			f.String("o", "hostname", "", "remote host to remove value from")
+		},
+	})
+	registryCmd.AddCommand(&grumble.Command{
 		Name:     consts.RegistryListSubStr,
 		Help:     "List the sub keys under a registry key",
 		LongHelp: help.GetHelpFor([]string{consts.RegistryListSubStr}),
@@ -1736,10 +2412,10 @@ func BindCommands(con *console.SliverConsoleClient) {
 
 	// [ Pivots ] --------------------------------------------------------------
 
-	con.App.AddCommand(&grumble.Command{
-		Name:     consts.PivotsListStr,
-		Help:     "List pivots",
-		LongHelp: help.GetHelpFor([]string{consts.PivotsListStr}),
+	pivotsCmd := &grumble.Command{
+		Name:     consts.PivotsStr,
+		Help:     "List pivots for active session",
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr}),
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
 			pivots.PivotsCmd(ctx, con)
@@ -1748,40 +2424,96 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 		Flags: func(f *grumble.Flags) {
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
-			f.String("i", "id", "", "session id")
 		},
 		HelpGroup: consts.SliverHelpGroup,
-	})
+	}
+	con.App.AddCommand(pivotsCmd)
 
-	con.App.AddCommand(&grumble.Command{
+	pivotsCmd.AddCommand(&grumble.Command{
 		Name:     consts.NamedPipeStr,
 		Help:     "Start a named pipe pivot listener",
-		LongHelp: help.GetHelpFor([]string{consts.NamedPipeStr}),
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr, consts.NamedPipeStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("n", "name", "", "name of the named pipe")
+			f.String("b", "bind", "", "name of the named pipe to bind pivot listener")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
-			pivots.NamedPipeListenerCmd(ctx, con)
+			pivots.StartNamedPipeListenerCmd(ctx, con)
 			con.Println()
 			return nil
 		},
 		HelpGroup: consts.SliverHelpGroup,
 	})
 
-	con.App.AddCommand(&grumble.Command{
+	pivotsCmd.AddCommand(&grumble.Command{
 		Name:     consts.TCPListenerStr,
 		Help:     "Start a TCP pivot listener",
-		LongHelp: help.GetHelpFor([]string{consts.TCPListenerStr}),
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr, consts.TCPListenerStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("s", "server", "0.0.0.0", "interface to bind server to")
-			f.Int("l", "lport", generate.DefaultTCPPivotPort, "tcp listen port")
+			f.String("b", "bind", "", "remote interface to bind pivot listener")
+			f.Int("l", "lport", generate.DefaultTCPPivotPort, "tcp pivot listener port")
+
 			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
 		},
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
-			pivots.TCPListenerCmd(ctx, con)
+			pivots.StartTCPListenerCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	pivotsCmd.AddCommand(&grumble.Command{
+		Name:     consts.StopStr,
+		Help:     "Stop a pivot listener",
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr, consts.StopStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("i", "id", 0, "id of the pivot listener to stop")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			pivots.StopPivotListenerCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	pivotsCmd.AddCommand(&grumble.Command{
+		Name:     consts.DetailsStr,
+		Help:     "Get details of a pivot listener",
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr, consts.StopStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("i", "id", 0, "id of the pivot listener to stop")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			pivots.PivotDetailsCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	pivotsCmd.AddCommand(&grumble.Command{
+		Name:     "graph",
+		Help:     "Get details of a pivot listener",
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr, "graph"}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("i", "id", 0, "id of the pivot listener to stop")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			pivots.PivotsGraphCmd(ctx, con)
 			con.Println()
 			return nil
 		},
@@ -1955,6 +2687,58 @@ func BindCommands(con *console.SliverConsoleClient) {
 	})
 	con.App.AddCommand(portfwdCmd)
 
+	// [ Socks ] --------------------------------------------------------------
+
+	socksCmd := &grumble.Command{
+		Name:     consts.Socks5Str,
+		Help:     "In-band SOCKS5 Proxy",
+		LongHelp: help.GetHelpFor([]string{consts.Socks5Str}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "router timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			socks.SocksCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	}
+	socksCmd.AddCommand(&grumble.Command{
+		Name:     consts.StartStr,
+		Help:     "Start an in-band SOCKS5 proxy",
+		LongHelp: help.GetHelpFor([]string{consts.Socks5Str}),
+		Flags: func(f *grumble.Flags) {
+			f.String("H", "host", "127.0.0.1", "Bind a Socks5 Host")
+			f.String("P", "port", "1081", "Bind a Socks5 Port")
+			f.String("u", "user", "", "socks5 auth username (will generate random password)")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			socks.SocksStartCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+	socksCmd.AddCommand(&grumble.Command{
+		Name:     consts.StopStr,
+		Help:     "Stop a SOCKS5 proxy",
+		LongHelp: help.GetHelpFor([]string{consts.Socks5Str}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "router timeout in seconds")
+			f.Int("i", "id", 0, "id of portfwd to remove")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			socks.SocksStopCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+	con.App.AddCommand(socksCmd)
+
 	// [ Monitor ] --------------------------------------------------------------
 
 	monitorCmd := &grumble.Command{
@@ -2079,9 +2863,9 @@ func BindCommands(con *console.SliverConsoleClient) {
 		HelpGroup: consts.GenericHelpGroup,
 	})
 	lootCmd.AddCommand(&grumble.Command{
-		Name:     consts.LootFetchStr,
+		Name:     consts.FetchStr,
 		Help:     "Fetch a piece of loot from the server's loot store",
-		LongHelp: help.GetHelpFor([]string{consts.LootStr, consts.LootFetchStr}),
+		LongHelp: help.GetHelpFor([]string{consts.LootStr, consts.FetchStr}),
 		Flags: func(f *grumble.Flags) {
 			f.String("s", "save", "", "save loot to a local file")
 			f.String("f", "filter", "", "filter based on loot type")
@@ -2114,6 +2898,70 @@ func BindCommands(con *console.SliverConsoleClient) {
 		HelpGroup: consts.GenericHelpGroup,
 	})
 	con.App.AddCommand(lootCmd)
+
+	// [ Hosts ] --------------------------------------------------------------
+	hostsCmd := &grumble.Command{
+		Name:     consts.HostsStr,
+		Help:     "Manage the database of hosts",
+		LongHelp: help.GetHelpFor([]string{consts.HostsStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			hosts.HostsCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	hostsCmd.AddCommand(&grumble.Command{
+		Name:     consts.RmStr,
+		Help:     "Remove a host from the database",
+		LongHelp: help.GetHelpFor([]string{consts.HostsStr, consts.RmStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			hosts.HostsRmCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	iocCmd := &grumble.Command{
+		Name:     consts.IOCStr,
+		Help:     "Manage tracked IOCs on a given host",
+		LongHelp: help.GetHelpFor([]string{consts.HostsStr, consts.IOCStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			hosts.HostsIOCCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	}
+	iocCmd.AddCommand(&grumble.Command{
+		Name:     consts.RmStr,
+		Help:     "Delete IOCs from the database",
+		LongHelp: help.GetHelpFor([]string{consts.HostsStr, consts.IOCStr, consts.RmStr}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			hosts.HostsIOCRmCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.GenericHelpGroup,
+	})
+	hostsCmd.AddCommand(iocCmd)
+	con.App.AddCommand(hostsCmd)
 
 	// [ Reactions ] -----------------------------------------------------------------
 
@@ -2214,7 +3062,7 @@ func BindCommands(con *console.SliverConsoleClient) {
 	// [ Get Privs ] -----------------------------------------------------------------
 	getprivsCmd := &grumble.Command{
 		Name:      consts.GetPrivsStr,
-		Help:      "Get current privileges (Windows)",
+		Help:      "Get current privileges (Windows only)",
 		LongHelp:  help.GetHelpFor([]string{consts.GetPrivsStr}),
 		HelpGroup: consts.SliverWinHelpGroup,
 		Run: func(ctx *grumble.Context) error {
@@ -2228,4 +3076,132 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 	}
 	con.App.AddCommand(getprivsCmd)
+
+	// [ Extensions ] -----------------------------------------------------------------
+	extensionCmd := &grumble.Command{
+		Name:      consts.ExtensionsStr,
+		Help:      "Manage extensions",
+		LongHelp:  help.GetHelpFor([]string{consts.ExtensionsStr}),
+		HelpGroup: consts.SliverHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			extensions.ExtensionsCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+	}
+
+	extensionCmd.AddCommand(&grumble.Command{
+		Name:      consts.ListStr,
+		Help:      "List extensions loaded in the current session or beacon",
+		LongHelp:  help.GetHelpFor([]string{consts.ExtensionsStr, consts.ListStr}),
+		HelpGroup: consts.SliverHelpGroup,
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			extensions.ExtensionsListCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+	})
+
+	extensionCmd.AddCommand(&grumble.Command{
+		Name:      consts.LoadStr,
+		Help:      "Temporarily load an extension from a local directory",
+		LongHelp:  help.GetHelpFor([]string{consts.ExtensionsStr, consts.LoadStr}),
+		HelpGroup: consts.SliverHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			extensions.ExtensionLoadCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("dir-path", "path to the extension directory")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return completers.LocalPathCompleter(prefix, args, con)
+		},
+	})
+
+	extensionCmd.AddCommand(&grumble.Command{
+		Name:      consts.InstallStr,
+		Help:      "Install an extension from a local directory or .tar.gz file",
+		LongHelp:  help.GetHelpFor([]string{consts.ExtensionsStr, consts.InstallStr}),
+		HelpGroup: consts.SliverHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			extensions.ExtensionsInstallCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("path", "path to the extension .tar.gz or directory")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return completers.LocalPathCompleter(prefix, args, con)
+		},
+	})
+
+	extensionCmd.AddCommand(&grumble.Command{
+		Name:      consts.RmStr,
+		Help:      "Remove an installed extension",
+		LongHelp:  help.GetHelpFor([]string{consts.ExtensionsStr, consts.RmStr}),
+		HelpGroup: consts.SliverHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			extensions.ExtensionsRemoveCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("name", "the command name of the extension to remove")
+		},
+		Completer: func(prefix string, args []string) []string {
+			return extensions.ExtensionsCommandNameCompleter(prefix, args, con)
+		},
+	})
+
+	con.App.AddCommand(extensionCmd)
+
+	// [ Prelude's Operator ] ------------------------------------------------------------
+	operatorCmd := &grumble.Command{
+		Name:      consts.PreludeOperatorStr,
+		Help:      "Manage connection to Prelude's Operator",
+		LongHelp:  help.GetHelpFor([]string{consts.PreludeOperatorStr}),
+		HelpGroup: consts.GenericHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			operator.OperatorCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+	}
+	operatorCmd.AddCommand(&grumble.Command{
+		Name:      consts.ConnectStr,
+		Help:      "Connect with Prelude's Operator",
+		LongHelp:  help.GetHelpFor([]string{consts.PreludeOperatorStr, consts.ConnectStr}),
+		HelpGroup: consts.GenericHelpGroup,
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			operator.ConnectCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Args: func(a *grumble.Args) {
+			a.String("connection-string", "connection string to the Operator Host")
+		},
+		Flags: func(f *grumble.Flags) {
+			f.Bool("s", "skip-existing", false, "Do not add existing sessions as Operator Agents")
+			f.String("a", "aes-key", "abcdefghijklmnopqrstuvwxyz012345", "AES key for communication encryption")
+			f.String("r", "range", "sliver", "Agents range")
+		},
+	})
+
+	con.App.AddCommand(operatorCmd)
 }

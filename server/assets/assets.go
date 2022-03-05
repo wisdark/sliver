@@ -25,12 +25,15 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	insecureRand "math/rand"
 	"os"
 	"os/user"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	ver "github.com/bishopfox/sliver/client/version"
 	protobufs "github.com/bishopfox/sliver/protobuf"
@@ -42,8 +45,7 @@ import (
 
 const (
 	// GoDirName - The directory to store the go compiler/toolchain files in
-	GoDirName  = "go"
-	dllDirName = "dll"
+	GoDirName = "go"
 
 	goPathDirName   = "gopath"
 	versionFileName = "version"
@@ -76,12 +78,6 @@ func GetRootAppDir() string {
 	return dir
 }
 
-// GetDllDir - Returns the full path to the data directory
-func GetDllDir() string {
-	dir := path.Join(GetRootAppDir(), dllDirName)
-	return dir
-}
-
 func assetVersion() string {
 	appDir := GetRootAppDir()
 	data, err := ioutil.ReadFile(path.Join(appDir, versionFileName))
@@ -106,11 +102,15 @@ func Setup(force bool, echo bool) {
 	if force || localVer == "" || localVer != ver.GitCommit {
 		setupLog.Infof("Version mismatch %v != %v", localVer, ver.GitCommit)
 		if echo {
-			fmt.Printf("Unpacking assets ...\n")
+			fmt.Printf(`
+Sliver  Copyright (C) 2022  Bishop Fox
+This program comes with ABSOLUTELY NO WARRANTY; for details type 'licenses'.
+This is free software, and you are welcome to redistribute it
+under certain conditions; type 'licenses' for details.`)
+			fmt.Printf("\n\nUnpacking assets ...\n")
 		}
 		setupGo(appDir)
 		setupCodenames(appDir)
-		setupDllPath(appDir)
 		saveAssetVersion(appDir)
 	}
 }
@@ -245,10 +245,11 @@ func SetupGoPath(goPathSrc string) error {
 		setupLog.Info("Static asset not found: constants.go")
 		return err
 	}
+	sliverpbGoSrc = stripSliverpb(sliverpbGoSrc)
 	sliverpbDir := path.Join(goPathSrc, "github.com", "bishopfox", "sliver", "protobuf", "sliverpb")
 	os.MkdirAll(sliverpbDir, 0700)
-	ioutil.WriteFile(path.Join(sliverpbDir, "constants.go"), sliverpbGoSrc, 0600)
-	ioutil.WriteFile(path.Join(sliverpbDir, "sliver.pb.go"), sliverpbConstSrc, 0600)
+	ioutil.WriteFile(path.Join(sliverpbDir, "sliver.pb.go"), sliverpbGoSrc, 0600)
+	ioutil.WriteFile(path.Join(sliverpbDir, "constants.go"), sliverpbConstSrc, 0600)
 
 	// Common PB
 	commonpbSrc, err := protobufs.FS.ReadFile("commonpb/common.pb.go")
@@ -260,23 +261,38 @@ func SetupGoPath(goPathSrc string) error {
 	os.MkdirAll(commonpbDir, 0700)
 	ioutil.WriteFile(path.Join(commonpbDir, "common.pb.go"), commonpbSrc, 0600)
 
+	// DNS PB
+	dnspbSrc, err := protobufs.FS.ReadFile("dnspb/dns.pb.go")
+	if err != nil {
+		setupLog.Info("Static asset not found: dns.pb.go")
+		return err
+	}
+	dnspbDir := path.Join(goPathSrc, "github.com", "bishopfox", "sliver", "protobuf", "dnspb")
+	os.MkdirAll(dnspbDir, 0700)
+	ioutil.WriteFile(path.Join(dnspbDir, "dns.pb.go"), dnspbSrc, 0600)
 	return nil
 }
 
-// setupDllPath - Sets the data directory up
-func setupDllPath(appDir string) error {
-	dataDir := GetDllDir()
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		setupLog.Infof("Creating data directory: %s", dataDir)
-		os.MkdirAll(dataDir, 0700)
+func stripSliverpb(src []byte) []byte {
+	out := src
+	re := regexp.MustCompile(`protobuf:"[a-z]+,\d+,[a-z]+,name=(?P<FieldName1>[a-zA-Z0-9]+),proto3(,enum=(?P<EnumName>[a-zA-Z\.]+))?" json:"(?P<FiledName2>[a-zA-Z0-9]+),[a-z]+"`)
+	found := re.FindAllSubmatch(src, -1)
+	for _, x := range found {
+		line := x[0]     // line that matched
+		typeName := x[1] // first named capturing group (FieldName1)
+		enumName := x[3]
+		if string(enumName) != "" {
+			newEnumName := pseudoRandStringRunes(len(enumName))
+			newEnumLine := bytes.ReplaceAll(line, enumName, []byte(newEnumName))
+			out = bytes.ReplaceAll(out, line, []byte(newEnumLine))
+			line = newEnumLine
+		}
+		// we don't care about FieldName2 because its value is the same as FieldName1
+		newItem := pseudoRandStringRunes(len(typeName))
+		newLine := bytes.ReplaceAll(line, typeName, []byte(newItem))
+		out = bytes.ReplaceAll(out, line, []byte(newLine))
 	}
-	hostingDll, err := assetsFs.ReadFile(path.Join("fs", "dll", "HostingCLRx64.dll"))
-	if err != nil {
-		setupLog.Info("failed to find the dll")
-		return err
-	}
-	err = ioutil.WriteFile(path.Join(dataDir, "HostingCLRx64.dll"), hostingDll, 0600)
-	return err
+	return out
 }
 
 func unzipGoDependency(fsPath string, targetPath string) error {
@@ -367,4 +383,14 @@ func unzip(src string, dest string) ([]string, error) {
 		}
 	}
 	return filenames, nil
+}
+
+func pseudoRandStringRunes(n int) string {
+	insecureRand.Seed(time.Now().UnixNano())
+	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[insecureRand.Intn(len(letterRunes))]
+	}
+	return string(b)
 }

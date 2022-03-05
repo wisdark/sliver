@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/commonpb"
@@ -42,7 +43,7 @@ const (
 
 var (
 	// ErrInvalidPort - Invalid TCP port number
-	ErrInvalidPort = errors.New("Invalid listener port")
+	ErrInvalidPort = errors.New("invalid listener port")
 )
 
 // GetJobs - List jobs
@@ -77,7 +78,7 @@ func (rpc *Server) KillJob(ctx context.Context, kill *clientpb.KillJobReq) (*cli
 		}
 	} else {
 		killJob.Success = false
-		err = errors.New("Invalid Job ID")
+		err = errors.New("invalid Job ID")
 	}
 	return killJob, err
 }
@@ -189,14 +190,17 @@ func (rpc *Server) StartHTTPSListener(ctx context.Context, req *clientpb.HTTPLis
 	}
 
 	conf := &c2.HTTPServerConfig{
-		Addr:    fmt.Sprintf("%s:%d", req.Host, listenPort),
-		LPort:   listenPort,
-		Secure:  true,
-		Domain:  req.Domain,
-		Website: req.Website,
-		Cert:    req.Cert,
-		Key:     req.Key,
-		ACME:    req.ACME,
+		Addr:            fmt.Sprintf("%s:%d", req.Host, listenPort),
+		LPort:           listenPort,
+		Secure:          true,
+		Domain:          req.Domain,
+		Website:         req.Website,
+		Cert:            req.Cert,
+		Key:             req.Key,
+		ACME:            req.ACME,
+		EnforceOTP:      req.EnforceOTP,
+		LongPollTimeout: time.Duration(req.LongPollTimeout),
+		LongPollJitter:  time.Duration(req.LongPollJitter),
 	}
 	job, err := c2.StartHTTPListenerJob(conf)
 	if err != nil {
@@ -205,14 +209,17 @@ func (rpc *Server) StartHTTPSListener(ctx context.Context, req *clientpb.HTTPLis
 
 	if req.Persistent {
 		cfg := &configs.HTTPJobConfig{
-			Domain:  req.Domain,
-			Host:    req.Host,
-			Port:    listenPort,
-			Secure:  true,
-			Website: req.Website,
-			Cert:    req.Cert,
-			Key:     req.Key,
-			ACME:    req.ACME,
+			Domain:          req.Domain,
+			Host:            req.Host,
+			Port:            listenPort,
+			Secure:          true,
+			Website:         req.Website,
+			Cert:            req.Cert,
+			Key:             req.Key,
+			ACME:            req.ACME,
+			EnforceOTP:      req.EnforceOTP,
+			LongPollTimeout: req.LongPollTimeout,
+			LongPollJitter:  req.LongPollJitter,
 		}
 		configs.GetServerConfig().AddHTTPJob(cfg)
 		job.PersistentID = cfg.JobID
@@ -232,12 +239,15 @@ func (rpc *Server) StartHTTPListener(ctx context.Context, req *clientpb.HTTPList
 	}
 
 	conf := &c2.HTTPServerConfig{
-		Addr:    fmt.Sprintf("%s:%d", req.Host, listenPort),
-		LPort:   listenPort,
-		Domain:  req.Domain,
-		Website: req.Website,
-		Secure:  false,
-		ACME:    false,
+		Addr:            fmt.Sprintf("%s:%d", req.Host, listenPort),
+		LPort:           listenPort,
+		Domain:          req.Domain,
+		Website:         req.Website,
+		Secure:          false,
+		ACME:            false,
+		EnforceOTP:      req.EnforceOTP,
+		LongPollTimeout: time.Duration(req.LongPollTimeout),
+		LongPollJitter:  time.Duration(req.LongPollJitter),
 	}
 	job, err := c2.StartHTTPListenerJob(conf)
 	if err != nil {
@@ -246,11 +256,14 @@ func (rpc *Server) StartHTTPListener(ctx context.Context, req *clientpb.HTTPList
 
 	if req.Persistent {
 		cfg := &configs.HTTPJobConfig{
-			Domain:  req.Domain,
-			Host:    req.Host,
-			Port:    listenPort,
-			Secure:  false,
-			Website: req.Website,
+			Domain:          req.Domain,
+			Host:            req.Host,
+			Port:            listenPort,
+			Secure:          false,
+			Website:         req.Website,
+			EnforceOTP:      req.EnforceOTP,
+			LongPollTimeout: req.LongPollTimeout,
+			LongPollJitter:  req.LongPollJitter,
 		}
 		configs.GetServerConfig().AddHTTPJob(cfg)
 		job.PersistentID = cfg.JobID

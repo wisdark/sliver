@@ -24,7 +24,11 @@ package db
 */
 
 import (
+	"encoding/hex"
+	"time"
+
 	"github.com/bishopfox/sliver/server/db/models"
+	"github.com/gofrs/uuid"
 	"gorm.io/gorm"
 )
 
@@ -32,6 +36,30 @@ var (
 	// ErrRecordNotFound - Record not found error
 	ErrRecordNotFound = gorm.ErrRecordNotFound
 )
+
+// ImplantConfigByID - Fetch implant build by name
+func ImplantConfigByID(id string) (*models.ImplantConfig, error) {
+	config := models.ImplantConfig{}
+	err := Session().Where(&models.ImplantConfig{
+		ID: uuid.FromStringOrNil(id),
+	}).First(&config).Error
+	if err != nil {
+		return nil, err
+	}
+	return &config, err
+}
+
+// ImplantConfigByECCPublicKey - Fetch implant build by it's ecc public key
+func ImplantConfigByECCPublicKeyDigest(publicKeyDigest [32]byte) (*models.ImplantConfig, error) {
+	config := models.ImplantConfig{}
+	err := Session().Where(&models.ImplantConfig{
+		ECCPublicKeyDigest: hex.EncodeToString(publicKeyDigest[:]),
+	}).First(&config).Error
+	if err != nil {
+		return nil, err
+	}
+	return &config, err
+}
 
 // ImplantBuilds - Return all implant builds
 func ImplantBuilds() ([]*models.ImplantBuild, error) {
@@ -87,7 +115,6 @@ func ImplantProfiles() ([]*models.ImplantProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	for _, profile := range profiles {
 		err = loadC2s(profile.ImplantConfig)
 		if err != nil {
@@ -106,12 +133,10 @@ func ImplantProfileByName(name string) (*models.ImplantProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	err = loadC2s(profile.ImplantConfig)
 	if err != nil {
 		return nil, err
 	}
-
 	return &profile, err
 }
 
@@ -187,4 +212,204 @@ func WGPeerIPs() ([]string, error) {
 		ips = append(ips, peer.TunIP)
 	}
 	return ips, nil
+}
+
+// ListHosts - List of all hosts in the database
+func ListHosts() ([]*models.Host, error) {
+	hosts := []*models.Host{}
+	err := Session().Where(
+		&models.Host{},
+	).Preload("IOCs").Preload("ExtensionData").Find(&hosts).Error
+	return hosts, err
+}
+
+// HostByHostID - Get host by the session's reported HostUUID
+func HostByHostID(id uuid.UUID) (*models.Host, error) {
+	host := models.Host{}
+	err := Session().Where(&models.Host{ID: id}).First(&host).Error
+	if err != nil {
+		return nil, err
+	}
+	return &host, nil
+}
+
+// HostByHostUUID - Get host by the session's reported HostUUID
+func HostByHostUUID(id string) (*models.Host, error) {
+	host := models.Host{}
+	err := Session().Where(
+		&models.Host{HostUUID: uuid.FromStringOrNil(id)},
+	).Preload("IOCs").Preload("ExtensionData").First(&host).Error
+	if err != nil {
+		return nil, err
+	}
+	return &host, nil
+}
+
+// IOCByID - Select an IOC by ID
+func IOCByID(id string) (*models.IOC, error) {
+	ioc := &models.IOC{}
+	err := Session().Where(
+		&models.IOC{ID: uuid.FromStringOrNil(id)},
+	).First(ioc).Error
+	return ioc, err
+}
+
+// BeaconByID - Select a Beacon by ID
+func BeaconByID(id string) (*models.Beacon, error) {
+	beacon := &models.Beacon{}
+	err := Session().Where(
+		&models.Beacon{ID: uuid.FromStringOrNil(id)},
+	).First(beacon).Error
+	return beacon, err
+}
+
+// BeaconTasksByBeaconID - Get all tasks for a specific beacon
+// by default will not fetch the request/response columns since
+// these could be arbitrarily large.
+func BeaconTasksByBeaconID(beaconID string) ([]*models.BeaconTask, error) {
+	beaconTasks := []*models.BeaconTask{}
+	id := uuid.FromStringOrNil(beaconID)
+	err := Session().Select([]string{
+		"ID", "EnvelopeID", "BeaconID", "CreatedAt", "State", "SentAt", "CompletedAt",
+		"Description",
+	}).Where(&models.BeaconTask{BeaconID: id}).Find(&beaconTasks).Error
+	return beaconTasks, err
+}
+
+// BeaconTaskByID - Select a specific BeaconTask by ID, this
+// will fetch the full request/response
+func BeaconTaskByID(taskID string) (*models.BeaconTask, error) {
+	task := &models.BeaconTask{}
+	err := Session().Where(
+		&models.BeaconTask{ID: uuid.FromStringOrNil(taskID)},
+	).First(task).Error
+	return task, err
+}
+
+// ListBeacons - Select a Beacon by ID
+func ListBeacons() ([]*models.Beacon, error) {
+	beacons := []*models.Beacon{}
+	err := Session().Where(&models.Beacon{}).Find(&beacons).Error
+	return beacons, err
+}
+
+// RenameBeacon - Rename a beacon
+func RenameBeacon(beaconID string, name string) error {
+	err := Session().Where(&models.Beacon{
+		ID: uuid.FromStringOrNil(beaconID),
+	}).Updates(models.Beacon{Name: name}).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// PendingBeaconTasksByBeaconID - Select a Beacon by ID, ordered by creation time
+func PendingBeaconTasksByBeaconID(beaconID string) ([]*models.BeaconTask, error) {
+	tasks := []*models.BeaconTask{}
+	err := Session().Where(
+		&models.BeaconTask{
+			BeaconID: uuid.FromStringOrNil(beaconID),
+			State:    models.PENDING,
+		},
+	).Order("created_at").Find(&tasks).Error
+	return tasks, err
+}
+
+// UpdateBeaconCheckinByID - Update the beacon's last / next checkin
+func UpdateBeaconCheckinByID(beaconID string, next int64) error {
+	err := Session().Where(&models.Beacon{
+		ID: uuid.FromStringOrNil(beaconID),
+	}).Updates(models.Beacon{
+		LastCheckin: time.Now(),
+		NextCheckin: next,
+	}).Error
+	return err
+}
+
+// BeaconTasksByEnvelopeID - Select a (sent) BeaconTask by its envelope ID
+func BeaconTaskByEnvelopeID(beaconID string, envelopeID int64) (*models.BeaconTask, error) {
+	task := &models.BeaconTask{}
+	err := Session().Where(
+		&models.BeaconTask{
+			BeaconID:   uuid.FromStringOrNil(beaconID),
+			EnvelopeID: envelopeID,
+			State:      models.SENT,
+		},
+	).First(task).Error
+	return task, err
+}
+
+// CountTasksByBeaconID - Select a (sent) BeaconTask by its envelope ID
+func CountTasksByBeaconID(beaconID uuid.UUID) (int64, int64, error) {
+	allTasks := int64(0)
+	completedTasks := int64(0)
+	err := Session().Model(&models.BeaconTask{}).Where(
+		&models.BeaconTask{
+			BeaconID: beaconID,
+		},
+	).Count(&allTasks).Error
+	if err != nil {
+		return 0, 0, err
+	}
+	err = Session().Model(&models.BeaconTask{}).Where(
+		&models.BeaconTask{
+			BeaconID: beaconID,
+			State:    models.COMPLETED,
+		},
+	).Count(&completedTasks).Error
+	return allTasks, completedTasks, err
+}
+
+// OperatorByToken - Select an operator by token value
+func OperatorByToken(value string) (*models.Operator, error) {
+	operator := &models.Operator{}
+	err := Session().Where(&models.Operator{
+		Token: value,
+	}).First(operator).Error
+	return operator, err
+}
+
+// OperatorAll - Select all operators from the database
+func OperatorAll() ([]*models.Operator, error) {
+	operators := []*models.Operator{}
+	err := Session().Distinct("Name").Find(&operators).Error
+	return operators, err
+}
+
+// GetKeyValue - Get a value from a key
+func GetKeyValue(key string) (string, error) {
+	keyValue := &models.KeyValue{}
+	err := Session().Where(&models.KeyValue{
+		Key: key,
+	}).First(keyValue).Error
+	return keyValue.Value, err
+}
+
+// SetKeyValue - Set the value for a key/value pair
+func SetKeyValue(key string, value string) error {
+	err := Session().Where(&models.KeyValue{
+		Key: key,
+	}).First(&models.KeyValue{}).Error
+	if err == ErrRecordNotFound {
+		err = Session().Create(&models.KeyValue{
+			Key:   key,
+			Value: value,
+		}).Error
+	} else {
+		err = Session().Where(&models.KeyValue{
+			Key: key,
+		}).Updates(models.KeyValue{
+			Key:   key,
+			Value: value,
+		}).Error
+	}
+	return err
+}
+
+// DeleteKeyValue - Delete a key/value pair
+func DeleteKeyValue(key string, value string) error {
+	return Session().Delete(&models.KeyValue{
+		Key: key,
+	}).Error
 }

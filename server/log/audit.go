@@ -41,6 +41,5 @@ func newAuditLogger() *logrus.Logger {
 	}
 	auditLogger.Out = jsonFile
 	auditLogger.SetLevel(logrus.DebugLevel)
-
 	return auditLogger
 }

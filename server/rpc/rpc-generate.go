@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path"
+	"path/filepath"
 	"runtime"
 
 	consts "github.com/bishopfox/sliver/client/constants"
@@ -52,14 +53,13 @@ func (rpc *Server) Generate(ctx context.Context, req *clientpb.GenerateReq) (*cl
 	}
 
 	if config == nil {
-		return nil, errors.New("Invalid implant config")
+		return nil, errors.New("invalid implant config")
 	}
 	switch req.Config.Format {
 	case clientpb.OutputFormat_SERVICE:
 		fallthrough
 	case clientpb.OutputFormat_EXECUTABLE:
 		fPath, err = generate.SliverExecutable(name, config)
-		break
 	case clientpb.OutputFormat_SHARED_LIB:
 		fPath, err = generate.SliverSharedLibrary(name, config)
 	case clientpb.OutputFormat_SHELLCODE:
@@ -70,7 +70,7 @@ func (rpc *Server) Generate(ctx context.Context, req *clientpb.GenerateReq) (*cl
 		return nil, err
 	}
 
-	filename := path.Base(fPath)
+	filename := filepath.Base(fPath)
 	filedata, err := ioutil.ReadFile(fPath)
 	if err != nil {
 		return nil, err
@@ -187,11 +187,11 @@ func (rpc *Server) SaveImplantProfile(ctx context.Context, profile *clientpb.Imp
 		}
 		core.EventBroker.Publish(core.Event{
 			EventType: consts.ProfileEvent,
-			Data:      []byte(fmt.Sprintf("%s", profile.Name)),
+			Data:      []byte(profile.Name),
 		})
 		return profile, nil
 	}
-	return nil, errors.New("Invalid profile name")
+	return nil, errors.New("invalid profile name")
 }
 
 // DeleteImplantProfile - Delete an implant profile
@@ -204,7 +204,7 @@ func (rpc *Server) DeleteImplantProfile(ctx context.Context, req *clientpb.Delet
 	if err == nil {
 		core.EventBroker.Publish(core.Event{
 			EventType: consts.ProfileEvent,
-			Data:      []byte(fmt.Sprintf("%s", profile.Name)),
+			Data:      []byte(profile.Name),
 		})
 	}
 	return &commonpb.Empty{}, err
@@ -224,7 +224,7 @@ func (rpc *Server) DeleteImplantBuild(ctx context.Context, req *clientpb.DeleteR
 	if err == nil {
 		core.EventBroker.Publish(core.Event{
 			EventType: consts.BuildEvent,
-			Data:      []byte(fmt.Sprintf("%s", build.Name)),
+			Data:      []byte(build.Name),
 		})
 	}
 	return &commonpb.Empty{}, err

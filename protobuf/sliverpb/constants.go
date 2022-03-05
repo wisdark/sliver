@@ -162,24 +162,29 @@ const (
 	// MsgNetstatReq - Netstat request
 	MsgNetstatReq
 
-	// MsgNamedPipesReq - Request to take create a new named pipe listener
-	MsgNamedPipesReq
-	// MsgNamedPipes - Response with the result
-	MsgNamedPipes
+	// *** Pivots ***
 
-	// MsgTCPPivotReq - Request to take create a new MTLS listener
-	MsgTCPPivotReq
-	// MsgTCPPivot - Response with the result
-	MsgTCPPivot
-	// MsgPivotListReq
-	MsgPivotListReq
+	// MsgPivotStartListenerReq - Start a listener
+	MsgPivotStartListenerReq
+	// MsgPivotStopListenerReq - Stop a listener
+	MsgPivotStopListenerReq
+	// MsgPivotListenersReq - List listeners request
+	MsgPivotListenersReq
+	// MsgPivotListeners - List listeners response
+	MsgPivotListeners
+	// MsgPivotPeerPing - Pivot peer ping message
+	MsgPivotPeerPing
+	// MsgPivotServerPing - Pivot peer ping message
+	MsgPivotServerPing
+	// PivotServerKeyExchange - Pivot to server key exchange
+	MsgPivotServerKeyExchange
+	// MsgPivotPeerEnvelope - An envelope from a pivot peer
+	MsgPivotPeerEnvelope
+	// MsgPivotPeerFailure - Failure to send an envelope to a pivot peer
+	MsgPivotPeerFailure
+	// MsgPivotSessionEnvelope
+	MsgPivotSessionEnvelope
 
-	// MsgPivotOpen - Request to create a new pivot tunnel
-	MsgPivotOpen
-	// MsgPivotClose - Request to notify the closing of an existing pivot tunnel
-	MsgPivotClose
-	// MsgPivotData - Request that encapsulates and envelope form a sliver to the server though the pivot and viceversa
-	MsgPivotData
 	// MsgStartServiceReq - Request to start a service
 	MsgStartServiceReq
 	// MsgStartService - Response to start service request
@@ -227,15 +232,14 @@ const (
 	// MsgPortfwd - Response of port forward
 	MsgPortfwd
 
-	// MsgReconnectIntervalReq
-	MsgReconnectIntervalReq
+	// MsgSocksData - Response of SocksData
+	MsgSocksData
 
-	MsgReconnectInterval
+	// MsgReconfigureReq
+	MsgReconfigureReq
 
-	// MsgPollIntervalReq
-	MsgPollIntervalReq
-
-	MsgPollInterval
+	// MsgReconfigure - Set Reconfigure
+	MsgReconfigure
 
 	// MsgUnsetEnvReq
 	MsgUnsetEnvReq
@@ -248,9 +252,28 @@ const (
 
 	// MsgRegistryListReq - List registry sub keys
 	MsgRegistrySubKeysListReq
-
 	// MsgRegistryListValuesReq - List registry values
 	MsgRegistryListValuesReq
+	// MsgRegisterExtensionReq - Register a new extension
+	MsgRegisterExtensionReq
+
+	// MsgCallExtensionReq - Run an extension command
+	MsgCallExtensionReq
+	// MsgListExtensionsReq - List loaded extensions
+	MsgListExtensionsReq
+
+	// MsgBeaconRegister - Register a new beacon
+	MsgBeaconRegister
+	// MsgBeaconTasks - Send/recv batches of beacon tasks
+	MsgBeaconTasks
+
+	// MsgOpenSession - Open a new session
+	MsgOpenSession
+	// MsgCloseSession - Close the active session
+	MsgCloseSession
+
+	// MsgRegistryDeleteKeyReq
+	MsgRegistryDeleteKeyReq
 )
 
 // Constants to replace enums
@@ -272,146 +295,110 @@ func MsgNumber(request proto.Message) uint32 {
 
 	case *Register:
 		return MsgRegister
-
 	case *TaskReq:
 		return MsgTaskReq
-
 	case *Ping:
 		return MsgPing
-
-	case *KillSessionReq:
+	case *KillReq:
 		return MsgKillSessionReq
-
 	case *LsReq:
 		return MsgLsReq
 	case *Ls:
 		return MsgLs
-
 	case *DownloadReq:
 		return MsgDownloadReq
 	case *Download:
 		return MsgDownload
-
 	case *UploadReq:
 		return MsgUploadReq
 	case *Upload:
 		return MsgUpload
-
 	case *CdReq:
 		return MsgCdReq
-
 	case *PwdReq:
 		return MsgPwdReq
 	case *Pwd:
 		return MsgPwd
-
 	case *RmReq:
 		return MsgRmReq
 	case *Rm:
 		return MsgRm
-
 	case *MkdirReq:
 		return MsgMkdirReq
 	case *Mkdir:
 		return MsgMkdir
-
 	case *PsReq:
 		return MsgPsReq
 	case *Ps:
 		return MsgPs
-
 	case *ShellReq:
 		return MsgShellReq
 	case *Shell:
 		return MsgShell
-
 	case *ProcessDumpReq:
 		return MsgProcessDumpReq
 	case *ProcessDump:
 		return MsgProcessDump
-
 	case *ImpersonateReq:
 		return MsgImpersonateReq
 	case *Impersonate:
 		return MsgImpersonate
-
 	case *RunAsReq:
 		return MsgRunAsReq
-
 	case *RunAs:
 		return MsgRunAs
-
 	case *RevToSelfReq:
 		return MsgRevToSelfReq
-
 	case *InvokeGetSystemReq:
 		return MsgInvokeGetSystemReq
-
 	case *GetSystem:
 		return MsgGetSystem
-
 	case *ExecuteAssemblyReq:
 		return MsgExecuteAssemblyReq
-
 	case *InvokeExecuteAssemblyReq:
 		return MsgInvokeExecuteAssemblyReq
-
 	case *ExecuteAssembly:
 		return MsgExecuteAssembly
 	case *ExecuteTokenReq:
 		return MsgExecuteTokenReq
-
 	case *InvokeMigrateReq:
 		return MsgInvokeMigrateReq
-
 	case *SideloadReq:
 		return MsgSideloadReq
 	case *Sideload:
 		return MsgSideload
-
 	case *SpawnDllReq:
 		return MsgSpawnDllReq
 	case *SpawnDll:
 		return MsgSpawnDll
-
 	case *IfconfigReq:
 		return MsgIfconfigReq
 	case *Ifconfig:
 		return MsgIfconfig
-
 	case *ExecuteReq:
 		return MsgExecuteReq
-
 	case *TerminateReq:
 		return MsgTerminateReq
-
 	case *Terminate:
 		return MsgTerminate
-
 	case *ScreenshotReq:
 		return MsgScreenshotReq
 	case *Screenshot:
 		return MsgScreenshot
-
 	case *NetstatReq:
 		return MsgNetstatReq
 
-	case *NamedPipesReq:
-		return MsgNamedPipesReq
-	case *NamedPipes:
-		return MsgNamedPipes
+	case *PivotStartListenerReq:
+		return MsgPivotStartListenerReq
+	case *PivotStopListenerReq:
+		return MsgPivotStopListenerReq
+	case *PivotListenersReq:
+		return MsgPivotListenersReq
+	case *PivotListeners:
+		return MsgPivotListeners
+	case *PivotPing:
+		return MsgPivotPeerPing
 
-	case *TCPPivotReq:
-		return MsgTCPPivotReq
-	case *TCPPivot:
-		return MsgTCPPivot
-
-	case *PivotOpen:
-		return MsgPivotOpen
-	case *PivotClose:
-		return MsgPivotClose
-	case *PivotData:
-		return MsgPivotData
 	case *StartServiceReq:
 		return MsgStartServiceReq
 	case *StopServiceReq:
@@ -438,9 +425,8 @@ func MsgNumber(request proto.Message) uint32 {
 		return MsgRegistryWriteReq
 	case *RegistryCreateKeyReq:
 		return MsgRegistryCreateKeyReq
-
-	case *PivotListReq:
-		return MsgPivotListReq
+	case *RegistryDeleteKeyReq:
+		return MsgRegistryDeleteKeyReq
 
 	case *WGPortForwardStartReq:
 		return MsgWGStartPortFwdReq
@@ -460,17 +446,11 @@ func MsgNumber(request proto.Message) uint32 {
 	case *Portfwd:
 		return MsgPortfwd
 
-	case *ReconnectIntervalReq:
-		return MsgReconnectIntervalReq
+	case *ReconfigureReq:
+		return MsgReconfigureReq
+	case *Reconfigure:
+		return MsgReconfigure
 
-	case *ReconnectInterval:
-		return MsgReconnectInterval
-
-	case *PollIntervalReq:
-		return MsgPollIntervalReq
-
-	case *PollInterval:
-		return MsgPollInterval
 	case *SSHCommandReq:
 		return MsgSSHCommandReq
 
@@ -480,6 +460,24 @@ func MsgNumber(request proto.Message) uint32 {
 		return MsgRegistrySubKeysListReq
 	case *RegistryListValuesReq:
 		return MsgRegistryListValuesReq
+
+	case *RegisterExtensionReq:
+		return MsgRegisterExtensionReq
+
+	case *CallExtensionReq:
+		return MsgCallExtensionReq
+
+	case *ListExtensionsReq:
+		return MsgListExtensionsReq
+
+	case *BeaconTasks:
+		return MsgBeaconTasks
+
+	case *OpenSession:
+		return MsgOpenSession
+	case *CloseSession:
+		return MsgCloseSession
+
 	}
 
 	return uint32(0)

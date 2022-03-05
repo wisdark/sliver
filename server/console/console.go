@@ -31,6 +31,7 @@ import (
 	consts "github.com/bishopfox/sliver/client/constants"
 	clienttransport "github.com/bishopfox/sliver/client/transport"
 	"github.com/bishopfox/sliver/protobuf/rpcpb"
+	"github.com/bishopfox/sliver/server/configs"
 	"github.com/bishopfox/sliver/server/transport"
 	"google.golang.org/grpc"
 )
@@ -49,11 +50,14 @@ func Start() {
 	}
 	conn, err := grpc.DialContext(context.Background(), "bufnet", options...)
 	if err != nil {
-		fmt.Printf(Warn+"Failed to dial bufnet: %s", err)
+		fmt.Printf(Warn+"Failed to dial bufnet: %s\n", err)
 		return
 	}
 	defer conn.Close()
 	localRPC := rpcpb.NewSliverRPCClient(conn)
+	if err := configs.CheckHTTPC2ConfigErrors(); err != nil {
+		fmt.Printf(Warn+"Error in HTTP C2 config: %s\n", err)
+	}
 	clientconsole.Start(localRPC, command.BindCommands, serverOnlyCmds, true)
 }
 
@@ -67,8 +71,9 @@ func serverOnlyCmds(console *clientconsole.SliverConsoleClient) {
 		Help:     "Enable multiplayer mode",
 		LongHelp: help.GetHelpFor([]string{consts.MultiplayerModeStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("s", "server", "", "interface to bind server to")
+			f.String("L", "lhost", "", "interface to bind server to")
 			f.Int("l", "lport", 31337, "tcp listen port")
+			f.Bool("p", "persistent", false, "make persistent across restarts")
 		},
 		Run: func(ctx *grumble.Context) error {
 			fmt.Println()
@@ -80,14 +85,14 @@ func serverOnlyCmds(console *clientconsole.SliverConsoleClient) {
 	})
 
 	console.App.AddCommand(&grumble.Command{
-		Name:     consts.NewPlayerStr,
-		Help:     "Create a new player config file",
-		LongHelp: help.GetHelpFor([]string{consts.NewPlayerStr}),
+		Name:     consts.NewOperatorStr,
+		Help:     "Create a new operator config file",
+		LongHelp: help.GetHelpFor([]string{consts.NewOperatorStr}),
 		Flags: func(f *grumble.Flags) {
 			f.String("l", "lhost", "", "listen host")
 			f.Int("p", "lport", 31337, "listen port")
 			f.String("s", "save", "", "directory/file to the binary to")
-			f.String("n", "operator", "", "operator name")
+			f.String("n", "name", "", "operator name")
 		},
 		Run: func(ctx *grumble.Context) error {
 			fmt.Println()
@@ -99,11 +104,11 @@ func serverOnlyCmds(console *clientconsole.SliverConsoleClient) {
 	})
 
 	console.App.AddCommand(&grumble.Command{
-		Name:     consts.KickPlayerStr,
-		Help:     "Kick a player from the server",
-		LongHelp: help.GetHelpFor([]string{consts.KickPlayerStr}),
+		Name:     consts.KickOperatorStr,
+		Help:     "Kick an operator from the server",
+		LongHelp: help.GetHelpFor([]string{consts.KickOperatorStr}),
 		Flags: func(f *grumble.Flags) {
-			f.String("o", "operator", "", "operator name")
+			f.String("n", "name", "", "operator name")
 		},
 		Run: func(ctx *grumble.Context) error {
 			fmt.Println()
@@ -113,5 +118,4 @@ func serverOnlyCmds(console *clientconsole.SliverConsoleClient) {
 		},
 		HelpGroup: consts.MultiplayerHelpGroup,
 	})
-
 }

@@ -44,6 +44,7 @@ type eventBroker struct {
 	send        chan Event
 }
 
+// Start - Start a broker channel
 func (broker *eventBroker) Start() {
 	subscribers := map[chan Event]struct{}{}
 	for {
@@ -59,13 +60,13 @@ func (broker *eventBroker) Start() {
 			delete(subscribers, sub)
 		case event := <-broker.publish:
 			for sub := range subscribers {
-				//TODO: Observed "panic: send on closed channel" here. Probably worth investigating
 				sub <- event
 			}
 		}
 	}
 }
 
+// Stop - Close the broker channel
 func (broker *eventBroker) Stop() {
 	close(broker.stop)
 }

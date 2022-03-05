@@ -14,7 +14,6 @@ import (
 	"github.com/bishopfox/sliver/protobuf/commonpb"
 	"github.com/bishopfox/sliver/protobuf/rpcpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
-	"github.com/bishopfox/sliver/server/core"
 )
 
 var (
@@ -30,7 +29,7 @@ var (
 // PortfwdMeta - Metadata about a portfwd listener
 type PortfwdMeta struct {
 	ID         int
-	SessionID  uint32
+	SessionID  string
 	BindAddr   string
 	RemoteAddr string
 }
@@ -126,7 +125,7 @@ func (p *ChannelProxy) HandleConn(conn net.Conn) {
 	// Cleanup
 	defer func() {
 		go conn.Close()
-		core.Tunnels.Close(tunnel.ID)
+		Tunnels.Close(tunnel.ID)
 	}()
 
 	errs := make(chan error, 1)
@@ -185,7 +184,7 @@ func (p *ChannelProxy) dialImplant(ctx context.Context) (*Tunnel, error) {
 		log.Printf("[tcpproxy] Failed to dial implant %s", err)
 		return nil, err
 	}
-	log.Printf("[tcpproxy] Created new tunnel with id %d (session %d)", rpcTunnel.TunnelID, p.Session.ID)
+	log.Printf("[tcpproxy] Created new tunnel with id %d (session %s)", rpcTunnel.TunnelID, p.Session.ID)
 	tunnel := Tunnels.Start(rpcTunnel.TunnelID, rpcTunnel.SessionID)
 
 	log.Printf("[tcpproxy] Binding tunnel to portfwd %d", p.Port())

@@ -27,8 +27,6 @@ import (
 
 // Loot - Represents a piece of loot
 type Loot struct {
-	// gorm.Model
-
 	ID        uuid.UUID `gorm:"primaryKey;->;<-:create;type:uuid;"`
 	CreatedAt time.Time `gorm:"->;<-:create;"`
 
@@ -36,6 +34,8 @@ type Loot struct {
 	FileType       int
 	CredentialType int
 	Name           string
+
+	OriginHost uuid.UUID `gorm:"type:uuid;"`
 }
 
 // BeforeCreate - GORM hook

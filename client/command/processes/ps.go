@@ -19,134 +19,181 @@ package processes
 */
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
-	"text/tabwriter"
 
-	// "time"
-
+	"github.com/bishopfox/sliver/client/command/settings"
 	"github.com/bishopfox/sliver/client/console"
+	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/commonpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
-
 	"github.com/desertbit/grumble"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
 	// Stylizes known processes in the `ps` command
-	knownProcs = map[string]string{
-		"ccSvcHst.exe":    console.Red, // SEP
-		"cb.exe":          console.Red, // Carbon Black
-		"MsMpEng.exe":     console.Red, // Windows Defender
-		"smartscreen.exe": console.Red, // Windows Defender Smart Screen
+	knownSecurityTools = map[string][]string{
+		// Process Name -> [Color, Stylized Name]
+		"ccSvcHst.exe":          {console.Red, "Symantec Endpoint Protection"}, // Symantec Endpoint Protection (SEP)
+		"cb.exe":                {console.Red, "Carbon Black"},                 // Carbon Black
+		"MsMpEng.exe":           {console.Red, "Windows Defender"},             // Windows Defender
+		"smartscreen.exe":       {console.Red, "Windows Smart Screen"},         // Windows Defender Smart Screen
+		"CSFalconService.exe":   {console.Red, "CrowdStrike"},                  // Crowdstrike Falcon Service
+		"CSFalconContainer.exe": {console.Red, "CrowdStrike"},                  // CrowdStrike Falcon Container Security
+		"bdservicehost.exe":     {console.Red, "Bitdefender"},                  // Bitdefender (Total Security)
+		"bdagent.exe":           {console.Red, "Bitdefender"},                  // Bitdefender (Total Security)
+		"bdredline.exe":         {console.Red, "Bitdefender"},                  // Bitdefender Redline Update Service (Source https://community.bitdefender.com/en/discussion/82135/bdredline-exe-bitdefender-total-security-2020)
 	}
 )
 
 // PsCmd - List processes on the remote system
 func PsCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
-	session := con.ActiveSession.GetInteractive()
-	if session == nil {
+	session, beacon := con.ActiveTarget.GetInteractive()
+	if session == nil && beacon == nil {
 		return
 	}
-
-	pidFilter := ctx.Flags.Int("pid")
-	exeFilter := ctx.Flags.String("exe")
-	ownerFilter := ctx.Flags.String("owner")
-
 	ps, err := con.Rpc.Ps(context.Background(), &sliverpb.PsReq{
-		Request: con.ActiveSession.Request(ctx),
+		Request: con.ActiveTarget.Request(ctx),
 	})
 	if err != nil {
 		con.PrintErrorf("%s\n", err)
 		return
 	}
+	os := getOS(session, beacon)
+	if ps.Response != nil && ps.Response.Async {
+		con.AddBeaconCallback(ps.Response.TaskID, func(task *clientpb.BeaconTask) {
+			err = proto.Unmarshal(task.Response, ps)
+			if err != nil {
+				con.PrintErrorf("Failed to decode response %s\n", err)
+				return
+			}
+			PrintPS(os, ps, false, ctx, con)
+			products := findKnownSecurityProducts(ps)
+			if 0 < len(products) {
+				con.Println()
+				con.PrintWarnf("Security Product(s): %s\n", strings.Join(products, ", "))
+			}
+		})
+		con.PrintAsyncResponse(ps.Response)
+	} else {
+		PrintPS(os, ps, true, ctx, con)
+		products := findKnownSecurityProducts(ps)
+		if 0 < len(products) {
+			con.Println()
+			con.PrintWarnf("Security Product(s): %s\n", strings.Join(products, ", "))
+		}
+	}
+}
 
-	outputBuf := bytes.NewBufferString("")
-	table := tabwriter.NewWriter(outputBuf, 0, 2, 2, ' ', tabwriter.DiscardEmptyColumns)
+func getOS(session *clientpb.Session, beacon *clientpb.Beacon) string {
+	if session != nil {
+		return session.OS
+	} else if beacon != nil {
+		return beacon.OS
+	}
+	return ""
+}
 
-	switch session.GetOS() {
+// PrintPS - Prints the process list
+func PrintPS(os string, ps *sliverpb.Ps, interactive bool, ctx *grumble.Context, con *console.SliverConsoleClient) {
+	pidFilter := ctx.Flags.Int("pid")
+	exeFilter := ctx.Flags.String("exe")
+	ownerFilter := ctx.Flags.String("owner")
+	overflow := ctx.Flags.Bool("overflow")
+	skipPages := ctx.Flags.Int("skip-pages")
+
+	tw := table.NewWriter()
+	tw.SetStyle(settings.GetTableStyle(con))
+
+	switch os {
 	case "windows":
-		fmt.Fprintf(table, "pid\tppid\towner\texecutable\tsession\n")
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t\n",
-			strings.Repeat("=", len("pid")),
-			strings.Repeat("=", len("ppid")),
-			strings.Repeat("=", len("owner")),
-			strings.Repeat("=", len("executable")),
-			strings.Repeat("=", len("session")),
-		)
+		tw.AppendHeader(table.Row{"pid", "ppid", "owner", "executable", "session"})
 	case "darwin":
 		fallthrough
 	case "linux":
-		fmt.Fprintf(table, "pid\tppid\towner\texecutable\t\n")
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t\n",
-			strings.Repeat("=", len("pid")),
-			strings.Repeat("=", len("ppid")),
-			strings.Repeat("=", len("owner")),
-			strings.Repeat("=", len("executable")),
-		)
+		tw.AppendHeader(table.Row{"pid", "ppid", "owner", "executable"})
 	default:
-		fmt.Fprintf(table, "pid\tppid\towner\texecutable\t\n")
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t\n",
-			strings.Repeat("=", len("pid")),
-			strings.Repeat("=", len("ppid")),
-			strings.Repeat("=", len("owner")),
-			strings.Repeat("=", len("executable")),
-		)
+		tw.AppendHeader(table.Row{"pid", "ppid", "owner", "executable"})
 	}
+
 	cmdLine := ctx.Flags.Bool("print-cmdline")
-	lineColors := []string{}
 	for _, proc := range ps.Processes {
-		var lineColor = ""
-		if pidFilter != -1 && proc.Pid == int32(pidFilter) {
-			lineColor = printProcInfo(table, proc, cmdLine, con)
-		}
-		if exeFilter != "" && strings.HasPrefix(proc.Executable, exeFilter) {
-			lineColor = printProcInfo(table, proc, cmdLine, con)
-		}
-		if ownerFilter != "" && strings.HasPrefix(proc.Owner, ownerFilter) {
-			lineColor = printProcInfo(table, proc, cmdLine, con)
-		}
-		if pidFilter == -1 && exeFilter == "" && ownerFilter == "" {
-			lineColor = printProcInfo(table, proc, cmdLine, con)
-		}
-
-		// Should be set to normal/green if we rendered the line
-		if lineColor != "" {
-			lineColors = append(lineColors, lineColor)
-		}
-	}
-	table.Flush()
-
-	for index, line := range strings.Split(outputBuf.String(), "\n") {
-		if len(line) == 0 {
+		if pidFilter != -1 && proc.Pid != int32(pidFilter) {
 			continue
 		}
-		// We need to account for the two rows of column headers
-		if 0 < len(line) && 2 <= index {
-			lineColor := lineColors[index-2]
-			con.Printf("%s%s%s\n", lineColor, line, console.Normal)
-		} else {
-			con.Printf("%s\n", line)
+		if exeFilter != "" && !strings.Contains(strings.ToLower(proc.Executable), strings.ToLower(exeFilter)) {
+			continue
 		}
+		if ownerFilter != "" && !strings.Contains(strings.ToLower(proc.Owner), strings.ToLower(ownerFilter)) {
+			continue
+		}
+		row := procRow(tw, proc, cmdLine, con)
+		tw.AppendRow(row)
 	}
-
+	tw.SortBy([]table.SortBy{
+		{Name: "pid", Mode: table.Asc},
+		{Name: "ppid", Mode: table.Asc},
+	})
+	if !interactive {
+		overflow = true
+	}
+	settings.PaginateTable(tw, skipPages, overflow, interactive, con)
 }
 
-// printProcInfo - Stylizes the process information
-func printProcInfo(table *tabwriter.Writer, proc *commonpb.Process, cmdLine bool, con *console.SliverConsoleClient) string {
-	color := console.Normal
-	if modifyColor, ok := knownProcs[proc.Executable]; ok {
-		color = modifyColor
+func findKnownSecurityProducts(ps *sliverpb.Ps) []string {
+	products := []string{}
+	for _, proc := range ps.Processes {
+		if secTool, ok := knownSecurityTools[proc.Executable]; ok {
+			products = append(products, secTool[1])
+		}
 	}
-	session := con.ActiveSession.GetInteractive()
+	return products
+}
+
+// procRow - Stylizes the process information
+func procRow(tw table.Writer, proc *commonpb.Process, cmdLine bool, con *console.SliverConsoleClient) table.Row {
+	session, beacon := con.ActiveTarget.GetInteractive()
+
+	color := console.Normal
+	if secTool, ok := knownSecurityTools[proc.Executable]; ok {
+		color = secTool[0]
+	}
 	if session != nil && proc.Pid == session.PID {
 		color = console.Green
 	}
+	if beacon != nil && proc.Pid == beacon.PID {
+		color = console.Green
+	}
+
+	var row table.Row
 	switch session.GetOS() {
 	case "windows":
-		fmt.Fprintf(table, "%d\t%d\t%s\t%s\t%d\t\n", proc.Pid, proc.Ppid, proc.Owner, proc.Executable, proc.SessionID)
+		if cmdLine {
+			var args string
+			if len(proc.CmdLine) >= 1 {
+				args = strings.Join(proc.CmdLine, " ")
+			} else {
+				args = proc.Executable
+			}
+			row = table.Row{
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Pid),
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Ppid),
+				fmt.Sprintf(color+"%s"+console.Normal, proc.Owner),
+				fmt.Sprintf(color+"%s"+console.Normal, args),
+				fmt.Sprintf(color+"%d"+console.Normal, proc.SessionID),
+			}
+		} else {
+			row = table.Row{
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Pid),
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Ppid),
+				fmt.Sprintf(color+"%s"+console.Normal, proc.Owner),
+				fmt.Sprintf(color+"%s"+console.Normal, proc.Executable),
+				fmt.Sprintf(color+"%d"+console.Normal, proc.SessionID),
+			}
+		}
 	case "darwin":
 		fallthrough
 	case "linux":
@@ -159,18 +206,28 @@ func printProcInfo(table *tabwriter.Writer, proc *commonpb.Process, cmdLine bool
 			} else {
 				args = proc.Executable
 			}
-			fmt.Fprintf(table, "%d\t%d\t%s\t%s\t\n", proc.Pid, proc.Ppid, proc.Owner, args)
+			row = table.Row{
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Pid),
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Ppid),
+				fmt.Sprintf(color+"%s"+console.Normal, proc.Owner),
+				fmt.Sprintf(color+"%s"+console.Normal, args),
+			}
 		} else {
-			fmt.Fprintf(table, "%d\t%d\t%s\t%s\t\n", proc.Pid, proc.Ppid, proc.Owner, proc.Executable)
+			row = table.Row{
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Pid),
+				fmt.Sprintf(color+"%d"+console.Normal, proc.Ppid),
+				fmt.Sprintf(color+"%s"+console.Normal, proc.Owner),
+				fmt.Sprintf(color+"%s"+console.Normal, proc.Executable),
+			}
 		}
 	}
-	return color
+	return row
 }
 
 // GetPIDByName - Get a PID by name from the active session
 func GetPIDByName(ctx *grumble.Context, name string, con *console.SliverConsoleClient) int {
 	ps, err := con.Rpc.Ps(context.Background(), &sliverpb.PsReq{
-		Request: con.ActiveSession.Request(ctx),
+		Request: con.ActiveTarget.Request(ctx),
 	})
 	if err != nil {
 		return -1
