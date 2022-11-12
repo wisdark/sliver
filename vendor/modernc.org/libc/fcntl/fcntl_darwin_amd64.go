@@ -219,6 +219,8 @@ type X__uint128_t = struct {
 type X__builtin_va_list = uintptr /* <builtin>:46:14 */
 type X__float128 = float64        /* <builtin>:47:21 */
 
+var X__darwin_check_fd_set_overflow uintptr /* <builtin>:146:5: */
+
 // Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
 //
 // @APPLE_LICENSE_HEADER_START@
@@ -406,6 +408,13 @@ type X__float128 = float64        /* <builtin>:47:21 */
 // The __CONCAT macro is a bit tricky -- make sure you don't put spaces
 // in between its arguments.  __CONCAT can also concatenate double-quoted
 // strings produced by the __STRING macro, but this only works with ANSI C.
+
+// In non-ANSI C environments, new programs will want ANSI-only C keywords
+// deleted from the program and old programs will want them left alone.
+// When using a compiler other than gcc, programs using the ANSI C keywords
+// const, inline etc. as normal identifiers should define -DNO_ANSI_KEYWORDS.
+// When using "gcc -traditional", we assume that this is the intent; if
+// __GNUC__ is defined but __STDC__ is not, we leave the new keywords alone.
 
 // __unused denotes variables and functions that may not be used, preventing
 // the compiler from warning about it if not used.
@@ -1906,7 +1915,7 @@ type Radvisory = struct {
 	F__ccgo_pad1 [4]byte
 } /* fcntl.h:371:1 */
 
-//* Information the user passes in to get the codeblobs out of the kernel
+// * Information the user passes in to get the codeblobs out of the kernel
 type Fcodeblobs = struct {
 	Ff_cd_hash   uintptr
 	Ff_hash_size Size_t
@@ -1917,7 +1926,7 @@ type Fcodeblobs = struct {
 	F__padding   int32
 } /* fcntl.h:378:9 */
 
-//* Information the user passes in to get the codeblobs out of the kernel
+// * Information the user passes in to get the codeblobs out of the kernel
 type Fcodeblobs_t = Fcodeblobs /* fcntl.h:386:3 */
 
 // detached code signatures data type -

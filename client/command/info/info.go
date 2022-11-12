@@ -19,20 +19,40 @@ package info
 */
 
 import (
+	"context"
 	"time"
 
+	"github.com/bishopfox/sliver/client/command/use"
 	"github.com/bishopfox/sliver/client/console"
 	consts "github.com/bishopfox/sliver/client/constants"
+	"github.com/bishopfox/sliver/protobuf/clientpb"
+	"github.com/bishopfox/sliver/protobuf/sliverpb"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/desertbit/grumble"
 )
 
 // InfoCmd - Display information about the active session
 func InfoCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
-	session, beacon := con.ActiveTarget.GetInteractive()
-	if session == nil && beacon == nil {
-		return
+	var err error
+
+	// Check if we have an active target via 'use'
+	session, beacon := con.ActiveTarget.Get()
+
+	idArg := ctx.Args.String("session")
+	if idArg != "" {
+		// ID passed via argument takes priority
+		session, beacon, err = use.SessionOrBeaconByID(idArg, con)
+	} else {
+		if session == nil && beacon == nil {
+			session, beacon, err = use.SelectSessionOrBeacon(con)
+			if err != nil {
+				con.PrintErrorf("%s\n", err)
+				return
+			}
+		}
 	}
+
 	if session != nil {
 
 		con.Printf(console.Bold+"        Session ID: %s%s\n", console.Normal, session.ID)
@@ -45,11 +65,14 @@ func InfoCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 		con.Printf(console.Bold+"               PID: %s%d\n", console.Normal, session.PID)
 		con.Printf(console.Bold+"                OS: %s%s\n", console.Normal, session.OS)
 		con.Printf(console.Bold+"           Version: %s%s\n", console.Normal, session.Version)
+		con.Printf(console.Bold+"            Locale: %s%s\n", console.Normal, session.Locale)
 		con.Printf(console.Bold+"              Arch: %s%s\n", console.Normal, session.Arch)
 		con.Printf(console.Bold+"         Active C2: %s%s\n", console.Normal, session.ActiveC2)
 		con.Printf(console.Bold+"    Remote Address: %s%s\n", console.Normal, session.RemoteAddress)
 		con.Printf(console.Bold+"         Proxy URL: %s%s\n", console.Normal, session.ProxyURL)
 		con.Printf(console.Bold+"Reconnect Interval: %s%s\n", console.Normal, time.Duration(session.ReconnectInterval).String())
+		con.Printf(console.Bold+"     First Contact: %s%s\n", console.Normal, con.FormatDateDelta(time.Unix(session.FirstContact, 0), true, false))
+		con.Printf(console.Bold+"      Last Checkin: %s%s\n", console.Normal, con.FormatDateDelta(time.Unix(session.LastCheckin, 0), true, false))
 
 	} else if beacon != nil {
 
@@ -63,12 +86,16 @@ func InfoCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 		con.Printf(console.Bold+"               PID: %s%d\n", console.Normal, beacon.PID)
 		con.Printf(console.Bold+"                OS: %s%s\n", console.Normal, beacon.OS)
 		con.Printf(console.Bold+"           Version: %s%s\n", console.Normal, beacon.Version)
+		con.Printf(console.Bold+"            Locale: %s%s\n", console.Normal, beacon.Locale)
 		con.Printf(console.Bold+"              Arch: %s%s\n", console.Normal, beacon.Arch)
 		con.Printf(console.Bold+"         Active C2: %s%s\n", console.Normal, beacon.ActiveC2)
 		con.Printf(console.Bold+"    Remote Address: %s%s\n", console.Normal, beacon.RemoteAddress)
 		con.Printf(console.Bold+"         Proxy URL: %s%s\n", console.Normal, beacon.ProxyURL)
 		con.Printf(console.Bold+"          Interval: %s%s\n", console.Normal, time.Duration(beacon.Interval).String())
 		con.Printf(console.Bold+"            Jitter: %s%s\n", console.Normal, time.Duration(beacon.Jitter).String())
+		con.Printf(console.Bold+"     First Contact: %s%s\n", console.Normal, con.FormatDateDelta(time.Unix(beacon.FirstContact, 0), true, false))
+		con.Printf(console.Bold+"      Last Checkin: %s%s\n", console.Normal, con.FormatDateDelta(time.Unix(beacon.LastCheckin, 0), true, false))
+		con.Printf(console.Bold+"      Next Checkin: %s%s\n", console.Normal, con.FormatDateDelta(time.Unix(beacon.NextCheckin, 0), true, true))
 
 	} else {
 		con.PrintErrorf("No target session, see `help %s`\n", consts.InfoStr)
@@ -120,9 +147,50 @@ func WhoamiCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	if session == nil && beacon == nil {
 		return
 	}
+
+	var isWin bool
+	con.Printf("Logon ID: ")
 	if session != nil {
 		con.Printf("%s\n", session.Username)
+		if session.GetOS() == "windows" {
+			isWin = true
+		}
 	} else if beacon != nil {
 		con.Printf("%s\n", beacon.Username)
+		if beacon.GetOS() == "windows" {
+			isWin = true
+		}
 	}
+
+	if isWin {
+		cto, err := con.Rpc.CurrentTokenOwner(context.Background(), &sliverpb.CurrentTokenOwnerReq{
+			Request: con.ActiveTarget.Request(ctx),
+		})
+		if err != nil {
+			con.PrintErrorf("%s\n", err)
+			return
+		}
+
+		if cto.Response != nil && cto.Response.Async {
+			con.AddBeaconCallback(cto.Response.TaskID, func(task *clientpb.BeaconTask) {
+				err = proto.Unmarshal(task.Response, cto)
+				if err != nil {
+					con.PrintErrorf("Failed to decode response %s\n", err)
+					return
+				}
+				PrintTokenOwner(cto, con)
+			})
+			con.PrintAsyncResponse(cto.Response)
+		} else {
+			PrintTokenOwner(cto, con)
+		}
+	}
+}
+
+func PrintTokenOwner(cto *sliverpb.CurrentTokenOwner, con *console.SliverConsoleClient) {
+	if cto.Response != nil && cto.Response.Err != "" {
+		con.PrintErrorf("%s\n", cto.Response.Err)
+		return
+	}
+	con.PrintInfof("Current Token ID: %s", cto.Output)
 }

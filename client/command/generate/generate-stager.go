@@ -1,12 +1,28 @@
 package generate
 
+/*
+	Sliver Implant Framework
+	Copyright (C) 2022  Bishop Fox
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -53,12 +69,12 @@ func GenerateStagerCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	arch := ctx.Flags.String("arch")
 	proto := ctx.Flags.String("protocol")
 	format := ctx.Flags.String("format")
-	badchars := ctx.Flags.String("badchars")
+	badChars := ctx.Flags.String("badchars")
 	save := ctx.Flags.String("save")
 
 	bChars := make([]string, 0)
-	if len(badchars) > 0 {
-		for _, b := range strings.Split(badchars, " ") {
+	if len(badChars) > 0 {
+		for _, b := range strings.Split(badChars, " ") {
 			bChars = append(bChars, fmt.Sprintf("\\x%s", b))
 		}
 	}
@@ -95,16 +111,12 @@ func GenerateStagerCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 
 	if save != "" || format == "raw" {
-		saveTo, _ := filepath.Abs(save)
-		fi, err := os.Stat(saveTo)
+		saveTo, err := saveLocation(save, stageFile.GetFile().GetName())
 		if err != nil {
-			con.PrintErrorf("Failed to generate sliver stager %v\n", err)
 			return
 		}
-		if fi.IsDir() {
-			saveTo = filepath.Join(saveTo, stageFile.GetFile().GetName())
-		}
-		err = ioutil.WriteFile(saveTo, stageFile.GetFile().GetData(), 0700)
+
+		err = os.WriteFile(saveTo, stageFile.GetFile().GetData(), 0700)
 		if err != nil {
 			con.PrintErrorf("Failed to write to: %s\n", saveTo)
 			return

