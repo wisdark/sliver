@@ -3,6 +3,7 @@ package mysql
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -49,13 +50,48 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 func (m Migrator) AlterColumn(value interface{}, field string) error {
 	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if field := stmt.Schema.LookUpField(field); field != nil {
+			fullDataType := m.FullDataTypeOf(field)
+			if m.Dialector.DontSupportRenameColumnUnique {
+				fullDataType.SQL = strings.Replace(fullDataType.SQL, " UNIQUE ", " ", 1)
+			}
+
 			return m.DB.Exec(
 				"ALTER TABLE ? MODIFY COLUMN ? ?",
-				clause.Table{Name: stmt.Table}, clause.Column{Name: field.DBName}, m.FullDataTypeOf(field),
+				clause.Table{Name: stmt.Table}, clause.Column{Name: field.DBName}, fullDataType,
 			).Error
 		}
 		return fmt.Errorf("failed to look up field with name: %s", field)
 	})
+}
+
+func (m Migrator) TiDBVersion() (isTiDB bool, major, minor, patch int, err error) {
+	// TiDB version string looks like:
+	// "5.7.25-TiDB-v6.5.0" or "5.7.25-TiDB-v6.4.0-serverless"
+	tidbVersionArray := strings.Split(m.Dialector.ServerVersion, "-")
+	if len(tidbVersionArray) < 3 || tidbVersionArray[1] != "TiDB" {
+		// It isn't TiDB
+		return
+	}
+
+	rawVersion := strings.TrimPrefix(tidbVersionArray[2], "v")
+	realVersionArray := strings.Split(rawVersion, ".")
+	if major, err = strconv.Atoi(realVersionArray[0]); err != nil {
+		err = fmt.Errorf("failed to parse the version of TiDB, the major version is: %s", realVersionArray[0])
+		return
+	}
+
+	if minor, err = strconv.Atoi(realVersionArray[1]); err != nil {
+		err = fmt.Errorf("failed to parse the version of TiDB, the minor version is: %s", realVersionArray[0])
+		return
+	}
+
+	if patch, err = strconv.Atoi(realVersionArray[2]); err != nil {
+		err = fmt.Errorf("failed to parse the version of TiDB, the patch version is: %s", realVersionArray[0])
+		return
+	}
+
+	isTiDB = true
+	return
 }
 
 func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error {
@@ -174,6 +210,10 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 
 		rawColumnTypes, err := rows.ColumnTypes()
 
+		if err != nil {
+			return err
+		}
+
 		if err := rows.Close(); err != nil {
 			return err
 		}
@@ -183,7 +223,7 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 		}
 		columnTypeSQL += "FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ORDINAL_POSITION"
 
-		columns, rowErr := m.DB.Raw(columnTypeSQL, currentDatabase, table).Rows()
+		columns, rowErr := m.DB.Table(table).Raw(columnTypeSQL, currentDatabase, table).Rows()
 		if rowErr != nil {
 			return rowErr
 		}
@@ -271,7 +311,7 @@ func (m Migrator) GetIndexes(value interface{}) ([]gorm.Index, error) {
 
 		result := make([]*Index, 0)
 		schema, table := m.CurrentSchema(stmt, stmt.Table)
-		scanErr := m.DB.Raw(indexSql, schema, table).Scan(&result).Error
+		scanErr := m.DB.Table(table).Raw(indexSql, schema, table).Scan(&result).Error
 		if scanErr != nil {
 			return scanErr
 		}
@@ -317,12 +357,10 @@ func groupByIndexName(indexList []*Index) map[string][]*Index {
 }
 
 func (m Migrator) CurrentSchema(stmt *gorm.Statement, table string) (string, string) {
-	if strings.Contains(table, ".") {
-		if tables := strings.Split(table, `.`); len(tables) == 2 {
-			return tables[0], tables[1]
-		}
+	if tables := strings.Split(table, `.`); len(tables) == 2 {
+		return tables[0], tables[1]
 	}
-
+	m.DB = m.DB.Table(table)
 	return m.CurrentDatabase(), table
 }
 

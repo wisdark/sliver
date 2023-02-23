@@ -20,8 +20,8 @@ set -e
 
 # Creates the static go asset archives
 
-GO_VER="1.19.3"
-GARBLE_VER="1.19.4"
+GO_VER="1.20.1"
+GARBLE_VER="1.20.2"
 SGN_VER="0.0.3"
 
 GO_ARCH_1="amd64"
@@ -157,7 +157,7 @@ echo "-----------------------------------------------------------------"
 echo "curl -L --fail --output $OUTPUT_DIR/linux/$GO_ARCH_1/garble https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_linux"
 curl -L --fail --output $OUTPUT_DIR/linux/$GO_ARCH_1/garble https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_linux
 echo "curl -L --fail --output $OUTPUT_DIR/linux/$GO_ARCH_2/garble https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_linux-$GO_ARCH_2"
-curl -L --fail --output $OUTPUT_DIR/linux/$GO_ARCH_2/garble https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_linux
+curl -L --fail --output $OUTPUT_DIR/linux/$GO_ARCH_2/garble https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_linux-$GO_ARCH_2
 echo "curl -L --fail --output $OUTPUT_DIR/windows/$GO_ARCH_1/garble.exe https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_windows.exe"
 curl -L --fail --output $OUTPUT_DIR/windows/$GO_ARCH_1/garble.exe https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_windows.exe
 echo "curl -L --fail --output $OUTPUT_DIR/darwin/$GO_ARCH_1/garble https://github.com/moloch--/garble/releases/download/v$GARBLE_VER/garble_macos-$GO_ARCH_1"
@@ -189,7 +189,6 @@ curl -L --fail --output $OUTPUT_DIR/darwin/$GO_ARCH_1/sgn.zip https://github.com
 # MacOS (arm64)
 echo "curl -L --fail --output $OUTPUT_DIR/darwin/$GO_ARCH_2/sgn.zip https://github.com/moloch--/sgn/releases/download/v$SGN_VER/sgn_macos-$GO_ARCH_2.zip"
 curl -L --fail --output $OUTPUT_DIR/darwin/$GO_ARCH_2/sgn.zip https://github.com/moloch--/sgn/releases/download/v$SGN_VER/sgn_macos-$GO_ARCH_2.zip
-
 
 # end
 echo -e "clean up: $WORK_DIR"
