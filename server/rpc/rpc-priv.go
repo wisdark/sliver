@@ -21,15 +21,15 @@ package rpc
 import (
 	"context"
 	"os"
-	"path"
 
 	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/commonpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
 	"github.com/bishopfox/sliver/server/codenames"
 	"github.com/bishopfox/sliver/server/core"
-	"github.com/bishopfox/sliver/server/cryptography"
+	"github.com/bishopfox/sliver/server/db"
 	"github.com/bishopfox/sliver/server/generate"
+	"github.com/bishopfox/sliver/util"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -76,30 +76,42 @@ func (rpc *Server) CurrentTokenOwner(ctx context.Context, req *sliverpb.CurrentT
 
 // GetSystem - Attempt to get 'NT AUTHORITY/SYSTEM' access on a remote Windows system
 func (rpc *Server) GetSystem(ctx context.Context, req *clientpb.GetSystemReq) (*sliverpb.GetSystem, error) {
-	var shellcode []byte
+	var (
+		shellcode []byte
+		name      string
+	)
+
 	session := core.Sessions.Get(req.Request.SessionID)
 	if session == nil {
 		return nil, ErrInvalidSessionID
 	}
 
-	name := path.Base(req.Config.GetName())
-	shellcode, _, err := getSliverShellcode(name)
+	// retrieve http c2 implant config
+	httpC2Config, err := db.LoadHTTPC2ConfigByName(req.Config.HTTPC2ConfigName)
 	if err != nil {
-		name, config := generate.ImplantConfigFromProtobuf(req.Config)
-		if name == "" {
-			name, err = codenames.GetCodename()
-			if err != nil {
-				return nil, err
-			}
-		}
-		config.Format = clientpb.OutputFormat_SHELLCODE
-		config.ObfuscateSymbols = false
-		otpSecret, _ := cryptography.TOTPServerSecret()
-		err = generate.GenerateConfig(name, config, true)
+		return nil, err
+	}
+
+	if req.Name == "" {
+		name, err = codenames.GetCodename()
 		if err != nil {
 			return nil, err
 		}
-		shellcodePath, err := generate.SliverShellcode(name, otpSecret, config, true)
+	} else if err := util.AllowedName(name); err != nil {
+		return nil, err
+	} else {
+		name = req.Name
+	}
+
+	shellcode, _, err = getSliverShellcode(name)
+	if err != nil {
+		req.Config.Format = clientpb.OutputFormat_SHELLCODE
+		req.Config.ObfuscateSymbols = false
+		build, err := generate.GenerateConfig(name, req.Config)
+		if err != nil {
+			return nil, err
+		}
+		shellcodePath, err := generate.SliverShellcode(name, build, req.Config, httpC2Config.ImplantConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -139,10 +151,26 @@ func (rpc *Server) MakeToken(ctx context.Context, req *sliverpb.MakeTokenReq) (*
 
 // GetPrivs - gRPC interface to get privilege information from the current process
 func (rpc *Server) GetPrivs(ctx context.Context, req *sliverpb.GetPrivsReq) (*sliverpb.GetPrivs, error) {
+	sessionID := req.Request.SessionID
+
 	resp := &sliverpb.GetPrivs{Response: &commonpb.Response{}}
 	err := rpc.GenericHandler(req, resp)
 	if err != nil {
 		return nil, err
 	}
+
+	/*
+		Update integrity information for a session
+		beacons will have to be updated by the client after the information is received from the implant
+	*/
+	if !req.Request.Async {
+		session := core.Sessions.Get(sessionID)
+		if session == nil {
+			return nil, ErrInvalidSessionID
+		}
+		session.Integrity = resp.ProcessIntegrity
+		core.Sessions.UpdateSession(session)
+	}
+
 	return resp, nil
 }

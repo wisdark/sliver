@@ -21,18 +21,18 @@ package generate
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/bishopfox/sliver/client/command/settings"
 	"github.com/bishopfox/sliver/client/console"
 	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/commonpb"
-	"github.com/desertbit/grumble"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/rsteube/carapace"
+	"github.com/spf13/cobra"
 )
 
-// ImplantBuildFilter - Filter implant builds
+// ImplantBuildFilter - Filter implant builds.
 type ImplantBuildFilter struct {
 	GOOS    string
 	GOARCH  string
@@ -42,8 +42,8 @@ type ImplantBuildFilter struct {
 	Debug   bool
 }
 
-// ImplantsCmd - Displays archived implant builds
-func ImplantsCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// ImplantsCmd - Displays archived implant builds.
+func ImplantsCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	builds, err := con.Rpc.ImplantBuilds(context.Background(), &commonpb.Empty{})
 	if err != nil {
 		con.PrintErrorf("%s\n", err)
@@ -52,14 +52,14 @@ func ImplantsCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	implantBuildFilters := ImplantBuildFilter{}
 
 	if 0 < len(builds.Configs) {
-		PrintImplantBuilds(builds.Configs, implantBuildFilters, con)
+		PrintImplantBuilds(builds, implantBuildFilters, con)
 	} else {
 		con.PrintInfof("No implant builds\n")
 	}
 }
 
 // PrintImplantBuilds - Print the implant builds on the server
-func PrintImplantBuilds(configs map[string]*clientpb.ImplantConfig, filters ImplantBuildFilter, con *console.SliverConsoleClient) {
+func PrintImplantBuilds(builds *clientpb.ImplantBuilds, filters ImplantBuildFilter, con *console.SliverClient) {
 	tw := table.NewWriter()
 	tw.SetStyle(settings.GetTableStyle(con))
 	tw.AppendHeader(table.Row{
@@ -70,12 +70,15 @@ func PrintImplantBuilds(configs map[string]*clientpb.ImplantConfig, filters Impl
 		"Format",
 		"Command & Control",
 		"Debug",
+		"C2 Config",
+		"ID",
+		"Stage",
 	})
 	tw.SortBy([]table.SortBy{
 		{Name: "Name", Mode: table.Asc},
 	})
 
-	for sliverName, config := range configs {
+	for sliverName, config := range builds.Configs {
 		if filters.GOOS != "" && config.GOOS != filters.GOOS {
 			continue
 		}
@@ -96,9 +99,15 @@ func PrintImplantBuilds(configs map[string]*clientpb.ImplantConfig, filters Impl
 			continue
 		}
 
-		implantType := "session"
+		implantType := ""
+		if builds.ResourceIDs[sliverName].Type != "" {
+			implantType = builds.ResourceIDs[sliverName].Type
+		}
+
 		if config.IsBeacon {
-			implantType = "beacon"
+			implantType += "beacon"
+		} else {
+			implantType += "session"
 		}
 		c2URLs := []string{}
 		for index, c2 := range config.C2 {
@@ -115,49 +124,88 @@ func PrintImplantBuilds(configs map[string]*clientpb.ImplantConfig, filters Impl
 			config.Format,
 			strings.Join(c2URLs, "\n"),
 			fmt.Sprintf("%v", config.Debug),
+			fmt.Sprintf(config.HTTPC2ConfigName),
+			fmt.Sprintf("%v", builds.ResourceIDs[sliverName].Value),
+			fmt.Sprintf("%v", builds.Staged[sliverName]),
 		})
 	}
 
 	con.Println(tw.Render())
+	con.Println("\n")
 }
 
-// ImplantBuildNameCompleter - Completer for implant build names
-func ImplantBuildNameCompleter(prefix string, args []string, filters ImplantBuildFilter, con *console.SliverConsoleClient) []string {
-	builds, err := con.Rpc.ImplantBuilds(context.Background(), &commonpb.Empty{})
-	if err != nil {
-		return []string{}
-	}
-	results := []string{}
-	for name, config := range builds.Configs {
-		if filters.GOOS != "" && config.GOOS != filters.GOOS {
-			continue
-		}
-		if filters.GOARCH != "" && config.GOARCH != filters.GOARCH {
-			continue
-		}
-		if filters.Beacon && !config.IsBeacon {
-			continue
-		}
-		if filters.Session && config.IsBeacon {
-			continue
-		}
-		if filters.Debug && config.Debug {
-			continue
-		}
-		if filters.Format != "" && !strings.EqualFold(config.Format.String(), filters.Format) {
-			continue
+// ImplantBuildNameCompleter - Completer for implant build names.
+func ImplantBuildNameCompleter(con *console.SliverClient) carapace.Action {
+	comps := func(ctx carapace.Context) carapace.Action {
+		var action carapace.Action
+
+		builds, err := con.Rpc.ImplantBuilds(context.Background(), &commonpb.Empty{})
+		if err != nil {
+			return carapace.ActionMessage("failed to get implant builds: %s", err.Error())
 		}
 
-		if strings.HasPrefix(name, prefix) {
-			results = append(results, name)
+		filters := &ImplantBuildFilter{}
+
+		results := []string{}
+		sessions := []string{}
+
+		for name, config := range builds.Configs {
+			if filters.GOOS != "" && config.GOOS != filters.GOOS {
+				continue
+			}
+			if filters.GOARCH != "" && config.GOARCH != filters.GOARCH {
+				continue
+			}
+			if filters.Beacon && !config.IsBeacon {
+				continue
+			}
+			if filters.Session && config.IsBeacon {
+				continue
+			}
+			if filters.Debug && config.Debug {
+				continue
+			}
+			if filters.Format != "" && !strings.EqualFold(config.Format.String(), filters.Format) {
+				continue
+			}
+
+			osArch := fmt.Sprintf("[%s/%s]", config.GOOS, config.GOARCH)
+			buildFormat := config.Format.String()
+
+			profileType := ""
+			if config.IsBeacon {
+				profileType = "(B)"
+			} else {
+				profileType = "(S)"
+			}
+
+			var domains []string
+			for _, c2 := range config.C2 {
+				domains = append(domains, c2.GetURL())
+			}
+
+			desc := fmt.Sprintf("%s %s %s %s", profileType, osArch, buildFormat, strings.Join(domains, ","))
+
+			if config.IsBeacon {
+				results = append(results, name)
+				results = append(results, desc)
+			} else {
+				sessions = append(sessions, name)
+				sessions = append(sessions, desc)
+			}
 		}
+
+		return action.Invoke(ctx).Merge(
+			carapace.ActionValuesDescribed(sessions...).Tag("session builds").Invoke(ctx),
+			carapace.ActionValuesDescribed(results...).Tag("beacon builds").Invoke(ctx),
+		).ToA()
 	}
-	sort.StringSlice(results).Sort()
-	return results
+
+	return carapace.ActionCallback(comps)
 }
 
-// ImplantBuildByName - Get an implant build by name
-func ImplantBuildByName(name string, con *console.SliverConsoleClient) *clientpb.ImplantConfig {
+// ImplantBuildByName - Get an implant build by name.
+func ImplantBuildByName(name string, con *console.SliverClient) *clientpb.ImplantConfig {
 	builds, err := con.Rpc.ImplantBuilds(context.Background(), &commonpb.Empty{})
 	if err != nil {
 		return nil

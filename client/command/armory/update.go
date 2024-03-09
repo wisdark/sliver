@@ -19,20 +19,21 @@ package armory
 */
 
 import (
-	"io/ioutil"
+	"os"
 	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/bishopfox/sliver/client/assets"
 	"github.com/bishopfox/sliver/client/command/alias"
 	"github.com/bishopfox/sliver/client/command/extensions"
 	"github.com/bishopfox/sliver/client/console"
-	"github.com/desertbit/grumble"
 )
 
 // ArmoryUpdateCmd - Update all installed extensions/aliases
-func ArmoryUpdateCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+func ArmoryUpdateCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	con.PrintInfof("Refreshing package cache ... ")
-	clientConfig := parseArmoryHTTPConfig(ctx)
+	clientConfig := parseArmoryHTTPConfig(cmd)
 	refresh(clientConfig)
 	con.Printf(console.Clearln + "\r")
 
@@ -65,11 +66,11 @@ func ArmoryUpdateCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-func checkForAliasUpdates(clientConfig ArmoryHTTPConfig, con *console.SliverConsoleClient) []string {
+func checkForAliasUpdates(clientConfig ArmoryHTTPConfig, con *console.SliverClient) []string {
 	cachedAliases, _ := packagesInCache()
 	results := []string{}
 	for _, aliasManifestPath := range assets.GetInstalledAliasManifests() {
-		data, err := ioutil.ReadFile(aliasManifestPath)
+		data, err := os.ReadFile(aliasManifestPath)
 		if err != nil {
 			continue
 		}
@@ -88,11 +89,11 @@ func checkForAliasUpdates(clientConfig ArmoryHTTPConfig, con *console.SliverCons
 	return results
 }
 
-func checkForExtensionUpdates(clientConfig ArmoryHTTPConfig, con *console.SliverConsoleClient) []string {
+func checkForExtensionUpdates(clientConfig ArmoryHTTPConfig, con *console.SliverClient) []string {
 	_, cachedExtensions := packagesInCache()
 	results := []string{}
 	for _, extManifestPath := range assets.GetInstalledExtensionManifests() {
-		data, err := ioutil.ReadFile(extManifestPath)
+		data, err := os.ReadFile(extManifestPath)
 		if err != nil {
 			continue
 		}
@@ -103,10 +104,11 @@ func checkForExtensionUpdates(clientConfig ArmoryHTTPConfig, con *console.Sliver
 		for _, latestExt := range cachedExtensions {
 			// Right now we don't try to enforce any kind of versioning, it is assumed if the version from
 			// the armory differs at all from the local version, the extension is out of date.
-			if latestExt.CommandName == localManifest.CommandName && latestExt.Version != localManifest.Version {
-				results = append(results, localManifest.CommandName)
+			if latestExt.Name == localManifest.Name && latestExt.Version != localManifest.Version {
+				results = append(results, localManifest.Name)
 			}
 		}
 	}
+
 	return results
 }

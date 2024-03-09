@@ -21,7 +21,6 @@ import (
 	"math"
 	"reflect"
 
-	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/state/wire"
 )
 
@@ -245,7 +244,7 @@ func (ds *decodeState) waitObject(ods *objectDecodeState, encoded wire.Object, c
 		// See decodeObject; we need to wait for the array (if non-nil).
 		ds.wait(ods, objectID(sv.Ref.Root), callback)
 	} else if iv, ok := encoded.(*wire.Interface); ok {
-		// It's an interface (wait recurisvely).
+		// It's an interface (wait recursively).
 		ds.waitObject(ods, iv.Value, callback)
 	} else if callback != nil {
 		// Nothing to wait for: execute the callback immediately.
@@ -568,7 +567,7 @@ func (ds *decodeState) decodeObject(ods *objectDecodeState, obj reflect.Value, e
 	case *wire.Interface:
 		ds.decodeInterface(ods, obj, x)
 	default:
-		// Shoud not happen, not propagated as an error.
+		// Should not happen, not propagated as an error.
 		Failf("unknown object %#v for %q", encoded, obj.Type().Name())
 	}
 }
@@ -660,9 +659,9 @@ func (ds *decodeState) Load(obj reflect.Value) {
 		numDeferred++
 		if s, ok := encoded.(*wire.Struct); ok && s.TypeID != 0 {
 			typ := ds.types.LookupType(typeID(s.TypeID))
-			log.Warningf("unused deferred object: ID %d, type %v", id, typ)
+			Failf("unused deferred object: ID %d, type %v", id, typ)
 		} else {
-			log.Warningf("unused deferred object: ID %d, %#v", id, encoded)
+			Failf("unused deferred object: ID %d, %#v", id, encoded)
 		}
 	}
 	if numDeferred != 0 {

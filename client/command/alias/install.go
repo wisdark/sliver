@@ -20,7 +20,6 @@ package alias
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,12 +28,12 @@ import (
 	"github.com/bishopfox/sliver/client/assets"
 	"github.com/bishopfox/sliver/client/console"
 	"github.com/bishopfox/sliver/util"
-	"github.com/desertbit/grumble"
+	"github.com/spf13/cobra"
 )
 
-// AliasesInstallCmd - Install an alias
-func AliasesInstallCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
-	aliasLocalPath := ctx.Args.String("path")
+// AliasesInstallCmd - Install an alias.
+func AliasesInstallCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
+	aliasLocalPath := args[0]
 	fi, err := os.Stat(aliasLocalPath)
 	if os.IsNotExist(err) {
 		con.PrintErrorf("Extension path '%s' does not exist", aliasLocalPath)
@@ -47,9 +46,9 @@ func AliasesInstallCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-// Install an extension from a directory
-func installFromDir(aliasLocalPath string, con *console.SliverConsoleClient) {
-	manifestData, err := ioutil.ReadFile(filepath.Join(aliasLocalPath, ManifestFileName))
+// Install an extension from a directory.
+func installFromDir(aliasLocalPath string, con *console.SliverClient) {
+	manifestData, err := os.ReadFile(filepath.Join(aliasLocalPath, ManifestFileName))
 	if err != nil {
 		con.PrintErrorf("Error reading %s: %s", ManifestFileName, err)
 		return
@@ -74,12 +73,12 @@ func installFromDir(aliasLocalPath string, con *console.SliverConsoleClient) {
 	con.PrintInfof("Installing alias '%s' (%s) ... ", manifest.Name, manifest.Version)
 	err = os.MkdirAll(installPath, 0o700)
 	if err != nil {
-		con.PrintErrorf("\nError creating alias directory: %s\n", err)
+		con.PrintErrorf("Error creating alias directory: %s\n", err)
 		return
 	}
-	err = ioutil.WriteFile(filepath.Join(installPath, ManifestFileName), manifestData, 0o600)
+	err = os.WriteFile(filepath.Join(installPath, ManifestFileName), manifestData, 0o600)
 	if err != nil {
-		con.PrintErrorf("\nFailed to write %s: %s\n", ManifestFileName, err)
+		con.PrintErrorf("Failed to write %s: %s\n", ManifestFileName, err)
 		forceRemoveAll(installPath)
 		return
 	}
@@ -90,7 +89,7 @@ func installFromDir(aliasLocalPath string, con *console.SliverConsoleClient) {
 			dst := filepath.Join(installPath, util.ResolvePath(cmdFile.Path))
 			err := util.CopyFile(src, dst)
 			if err != nil {
-				con.PrintErrorf("\nError copying file '%s' -> '%s': %s\n", src, dst, err)
+				con.PrintErrorf("Error copying file '%s' -> '%s': %s\n", src, dst, err)
 				forceRemoveAll(installPath)
 				return
 			}
@@ -100,8 +99,8 @@ func installFromDir(aliasLocalPath string, con *console.SliverConsoleClient) {
 	con.Printf("done!\n")
 }
 
-// Install an extension from a .tar.gz file
-func InstallFromFile(aliasGzFilePath string, autoOverwrite bool, con *console.SliverConsoleClient) *string {
+// Install an extension from a .tar.gz file.
+func InstallFromFile(aliasGzFilePath string, autoOverwrite bool, con *console.SliverClient) *string {
 	manifestData, err := util.ReadFileFromTarGz(aliasGzFilePath, fmt.Sprintf("./%s", ManifestFileName))
 	if err != nil {
 		con.PrintErrorf("Failed to read %s from '%s': %s\n", ManifestFileName, aliasGzFilePath, err)
@@ -129,12 +128,12 @@ func InstallFromFile(aliasGzFilePath string, autoOverwrite bool, con *console.Sl
 	con.PrintInfof("Installing alias '%s' (%s) ... ", manifest.Name, manifest.Version)
 	err = os.MkdirAll(installPath, 0o700)
 	if err != nil {
-		con.PrintErrorf("\nFailed to create alias directory: %s\n", err)
+		con.PrintErrorf("Failed to create alias directory: %s\n", err)
 		return nil
 	}
-	err = ioutil.WriteFile(filepath.Join(installPath, ManifestFileName), manifestData, 0o600)
+	err = os.WriteFile(filepath.Join(installPath, ManifestFileName), manifestData, 0o600)
 	if err != nil {
-		con.PrintErrorf("\nFailed to write %s: %s\n", ManifestFileName, err)
+		con.PrintErrorf("Failed to write %s: %s\n", ManifestFileName, err)
 		forceRemoveAll(installPath)
 		return nil
 	}
@@ -142,7 +141,7 @@ func InstallFromFile(aliasGzFilePath string, autoOverwrite bool, con *console.Sl
 		if aliasFile.Path != "" {
 			err := installArtifact(aliasGzFilePath, installPath, aliasFile.Path, con)
 			if err != nil {
-				con.PrintErrorf("\nFailed to install file: %s\n", err)
+				con.PrintErrorf("Failed to install file: %s\n", err)
 				forceRemoveAll(installPath)
 				return nil
 			}
@@ -152,8 +151,8 @@ func InstallFromFile(aliasGzFilePath string, autoOverwrite bool, con *console.Sl
 	return &installPath
 }
 
-func installArtifact(aliasGzFilePath string, installPath, artifactPath string, con *console.SliverConsoleClient) error {
-	data, err := util.ReadFileFromTarGz(aliasGzFilePath, fmt.Sprintf("./%s", strings.TrimPrefix(artifactPath, "/")))
+func installArtifact(aliasGzFilePath string, installPath, artifactPath string, con *console.SliverClient) error {
+	data, err := util.ReadFileFromTarGz(aliasGzFilePath, fmt.Sprintf("./%s", strings.TrimPrefix(artifactPath, string(os.PathSeparator))))
 	if err != nil {
 		return err
 	}
@@ -165,7 +164,7 @@ func installArtifact(aliasGzFilePath string, installPath, artifactPath string, c
 	if _, err := os.Stat(artifactDir); os.IsNotExist(err) {
 		os.MkdirAll(artifactDir, 0o700)
 	}
-	err = ioutil.WriteFile(localArtifactPath, data, 0o600)
+	err = os.WriteFile(localArtifactPath, data, 0o600)
 	if err != nil {
 		return err
 	}

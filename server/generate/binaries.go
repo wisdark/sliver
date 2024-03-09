@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	insecureRand "math/rand"
 	"net/url"
 	"os"
 	"path"
@@ -39,9 +40,13 @@ import (
 	"github.com/bishopfox/sliver/server/configs"
 	"github.com/bishopfox/sliver/server/cryptography"
 	"github.com/bishopfox/sliver/server/db/models"
+	"github.com/bishopfox/sliver/server/encoders"
 	"github.com/bishopfox/sliver/server/gogo"
 	"github.com/bishopfox/sliver/server/log"
 	"github.com/bishopfox/sliver/util"
+	utilEncoders "github.com/bishopfox/sliver/util/encoders"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
@@ -134,79 +139,6 @@ const (
 	SliverPlatformCXX32EnvVar = "SLIVER_%s_CXX_32"
 )
 
-// ImplantConfigFromProtobuf - Create a native config struct from Protobuf
-func ImplantConfigFromProtobuf(pbConfig *clientpb.ImplantConfig) (string, *models.ImplantConfig) {
-	cfg := &models.ImplantConfig{}
-
-	cfg.IsBeacon = pbConfig.IsBeacon
-	cfg.BeaconInterval = pbConfig.BeaconInterval
-	cfg.BeaconJitter = pbConfig.BeaconJitter
-
-	cfg.GOOS = pbConfig.GOOS
-	cfg.GOARCH = pbConfig.GOARCH
-	cfg.MtlsCACert = pbConfig.MtlsCACert
-	cfg.MtlsCert = pbConfig.MtlsCert
-	cfg.MtlsKey = pbConfig.MtlsKey
-	cfg.Debug = pbConfig.Debug
-	cfg.Evasion = pbConfig.Evasion
-	cfg.ObfuscateSymbols = pbConfig.ObfuscateSymbols
-	cfg.TemplateName = pbConfig.TemplateName
-	if cfg.TemplateName == "" {
-		cfg.TemplateName = SliverTemplateName
-	}
-	cfg.ConnectionStrategy = pbConfig.ConnectionStrategy
-
-	cfg.WGImplantPrivKey = pbConfig.WGImplantPrivKey
-	cfg.WGServerPubKey = pbConfig.WGServerPubKey
-	cfg.WGPeerTunIP = pbConfig.WGPeerTunIP
-	cfg.WGKeyExchangePort = pbConfig.WGKeyExchangePort
-	cfg.WGTcpCommsPort = pbConfig.WGTcpCommsPort
-	cfg.ReconnectInterval = pbConfig.ReconnectInterval
-	cfg.MaxConnectionErrors = pbConfig.MaxConnectionErrors
-
-	cfg.LimitDomainJoined = pbConfig.LimitDomainJoined
-	cfg.LimitDatetime = pbConfig.LimitDatetime
-	cfg.LimitUsername = pbConfig.LimitUsername
-	cfg.LimitHostname = pbConfig.LimitHostname
-	cfg.LimitFileExists = pbConfig.LimitFileExists
-	cfg.LimitLocale = pbConfig.LimitLocale
-
-	cfg.Format = pbConfig.Format
-	cfg.IsSharedLib = pbConfig.IsSharedLib
-	cfg.IsService = pbConfig.IsService
-	cfg.IsShellcode = pbConfig.IsShellcode
-
-	cfg.RunAtLoad = pbConfig.RunAtLoad
-
-	cfg.CanaryDomains = []models.CanaryDomain{}
-	for _, pbCanary := range pbConfig.CanaryDomains {
-		cfg.CanaryDomains = append(cfg.CanaryDomains, models.CanaryDomain{
-			Domain: pbCanary,
-		})
-	}
-
-	// Copy C2
-	cfg.C2 = copyC2List(pbConfig.C2)
-	cfg.MTLSc2Enabled = isC2Enabled([]string{"mtls"}, cfg.C2)
-	cfg.WGc2Enabled = isC2Enabled([]string{"wg"}, cfg.C2)
-	cfg.HTTPc2Enabled = isC2Enabled([]string{"http", "https"}, cfg.C2)
-	cfg.DNSc2Enabled = isC2Enabled([]string{"dns"}, cfg.C2)
-	cfg.NamePipec2Enabled = isC2Enabled([]string{"namedpipe"}, cfg.C2)
-	cfg.TCPPivotc2Enabled = isC2Enabled([]string{"tcppivot"}, cfg.C2)
-
-	if pbConfig.FileName != "" {
-		cfg.FileName = path.Base(pbConfig.FileName)
-	}
-
-	name := ""
-	if err := util.AllowedName(pbConfig.Name); err != nil {
-		buildLog.Warnf("%s\n", err)
-	} else {
-		name = pbConfig.Name
-	}
-	return name, cfg
-}
-
 func copyC2List(src []*clientpb.ImplantC2) []models.ImplantC2 {
 	c2s := []models.ImplantC2{}
 	for _, srcC2 := range src {
@@ -244,7 +176,7 @@ func isC2Enabled(schemes []string, c2s []models.ImplantC2) bool {
 // GetSliversDir - Get the binary directory
 func GetSliversDir() string {
 	appDir := assets.GetRootAppDir()
-	sliversDir := path.Join(appDir, sliversDirName)
+	sliversDir := filepath.Join(appDir, sliversDirName)
 	if _, err := os.Stat(sliversDir); os.IsNotExist(err) {
 		buildLog.Debugf("Creating bin directory: %s", sliversDir)
 		err = os.MkdirAll(sliversDir, 0700)
@@ -260,7 +192,7 @@ func GetSliversDir() string {
 // -----------------------
 
 // SliverShellcode - Generates a sliver shellcode using Donut
-func SliverShellcode(name string, otpSecret string, config *models.ImplantConfig, save bool) (string, error) {
+func SliverShellcode(name string, build *clientpb.ImplantBuild, config *clientpb.ImplantConfig, pbC2Implant *clientpb.HTTPC2ImplantConfig) (string, error) {
 	if config.GOOS != "windows" {
 		return "", fmt.Errorf("shellcode format is currently only supported on Windows")
 	}
@@ -278,9 +210,9 @@ func SliverShellcode(name string, otpSecret string, config *models.ImplantConfig
 		HTTPSPROXY: getGoHttpsProxy(),
 
 		Obfuscation: config.ObfuscateSymbols,
-		GOGARBLE:    goPrivate(config),
+		GOGARBLE:    goGarble(config),
 	}
-	pkgPath, err := renderSliverGoCode(name, otpSecret, config, goConfig)
+	pkgPath, err := renderSliverGoCode(name, build, config, goConfig, pbC2Implant)
 	if err != nil {
 		return "", err
 	}
@@ -288,21 +220,26 @@ func SliverShellcode(name string, otpSecret string, config *models.ImplantConfig
 	dest := filepath.Join(goConfig.ProjectDir, "bin", filepath.Base(name))
 	dest += ".bin"
 
-	tags := []string{} // []string{"netgo"}
-	ldflags := []string{"-s -w -buildid="}
+	// if the destination already exists, delete it
+	if _, err := os.Stat(dest); err == nil {
+		os.Remove(dest)
+	}
+
+	tags := []string{}
+	if config.NetGoEnabled {
+		tags = append(tags, "netgo")
+	}
+	ldflags := []string{""} // Garble will automatically add "-s -w -buildid="
 	if !config.Debug && goConfig.GOOS == WINDOWS {
 		ldflags[0] += " -H=windowsgui"
 	}
 	// Keep those for potential later use
-	gcflags := ""
-	asmflags := ""
-	// trimpath is now a separate flag since Go 1.13
-	trimpath := "-trimpath"
-	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "pie", tags, ldflags, gcflags, asmflags, trimpath)
+	gcFlags := ""
+	asmFlags := ""
+	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "pie", tags, ldflags, gcFlags, asmFlags)
 	if err != nil {
 		return "", err
 	}
-	config.FileName = path.Base(dest)
 	shellcode, err := DonutShellcodeFromFile(dest, config.GOARCH, false, "", "", "")
 	if err != nil {
 		return "", err
@@ -312,19 +249,13 @@ func SliverShellcode(name string, otpSecret string, config *models.ImplantConfig
 		return "", err
 	}
 	config.Format = clientpb.OutputFormat_SHELLCODE
-	// Save to database
-	if save {
-		saveBuildErr := ImplantBuildSave(name, config, dest)
-		if saveBuildErr != nil {
-			buildLog.Errorf("Failed to save build: %s", saveBuildErr)
-		}
-	}
+
 	return dest, err
 
 }
 
 // SliverSharedLibrary - Generates a sliver shared library (DLL/dylib/so) binary
-func SliverSharedLibrary(name string, otpSecret string, config *models.ImplantConfig, save bool) (string, error) {
+func SliverSharedLibrary(name string, build *clientpb.ImplantBuild, config *clientpb.ImplantConfig, pbC2Implant *clientpb.HTTPC2ImplantConfig) (string, error) {
 	// Compile go code
 	var cc string
 	var cxx string
@@ -354,9 +285,9 @@ func SliverSharedLibrary(name string, otpSecret string, config *models.ImplantCo
 		HTTPSPROXY: getGoHttpsProxy(),
 
 		Obfuscation: config.ObfuscateSymbols,
-		GOGARBLE:    goPrivate(config),
+		GOGARBLE:    goGarble(config),
 	}
-	pkgPath, err := renderSliverGoCode(name, otpSecret, config, goConfig)
+	pkgPath, err := renderSliverGoCode(name, build, config, goConfig, pbC2Implant)
 	if err != nil {
 		return "", err
 	}
@@ -372,8 +303,11 @@ func SliverSharedLibrary(name string, otpSecret string, config *models.ImplantCo
 		dest += ".so"
 	}
 
-	tags := []string{} // []string{"netgo"}
-	ldflags := []string{"-s -w -buildid="}
+	tags := []string{}
+	if config.NetGoEnabled {
+		tags = append(tags, "netgo")
+	}
+	ldflags := []string{""} // Garble will automatically add "-s -w -buildid="
 	if !config.Debug && goConfig.GOOS == WINDOWS {
 		ldflags[0] += " -H=windowsgui"
 	}
@@ -382,27 +316,18 @@ func SliverSharedLibrary(name string, otpSecret string, config *models.ImplantCo
 		ldflags[0] += " -linkmode external -extldflags \"-static\""
 	}
 	// Keep those for potential later use
-	gcflags := ""
-	asmflags := ""
-	// trimpath is now a separate flag since Go 1.13
-	trimpath := "-trimpath"
-	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "c-shared", tags, ldflags, gcflags, asmflags, trimpath)
+	gcFlags := ""
+	asmFlags := ""
+	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "c-shared", tags, ldflags, gcFlags, asmFlags)
 	if err != nil {
 		return "", err
 	}
-	config.FileName = filepath.Base(dest)
 
-	if save {
-		err = ImplantBuildSave(name, config, dest)
-		if err != nil {
-			buildLog.Errorf("Failed to save build: %s", err)
-		}
-	}
 	return dest, err
 }
 
 // SliverExecutable - Generates a sliver executable binary
-func SliverExecutable(name string, otpSecret string, config *models.ImplantConfig, save bool) (string, error) {
+func SliverExecutable(name string, build *clientpb.ImplantBuild, config *clientpb.ImplantConfig, pbC2Implant *clientpb.HTTPC2ImplantConfig) (string, error) {
 	// Compile go code
 	appDir := assets.GetRootAppDir()
 	cgo := "0"
@@ -422,10 +347,10 @@ func SliverExecutable(name string, otpSecret string, config *models.ImplantConfi
 		HTTPSPROXY: getGoHttpsProxy(),
 
 		Obfuscation: config.ObfuscateSymbols,
-		GOGARBLE:    goPrivate(config),
+		GOGARBLE:    goGarble(config),
 	}
 
-	pkgPath, err := renderSliverGoCode(name, otpSecret, config, goConfig)
+	pkgPath, err := renderSliverGoCode(name, build, config, goConfig, pbC2Implant)
 	if err != nil {
 		return "", err
 	}
@@ -434,38 +359,30 @@ func SliverExecutable(name string, otpSecret string, config *models.ImplantConfi
 	if goConfig.GOOS == WINDOWS {
 		dest += ".exe"
 	}
-	tags := []string{} // []string{"netgo"}
-	ldflags := []string{"-s -w -buildid="}
+	tags := []string{}
+	if config.NetGoEnabled {
+		tags = append(tags, "netgo")
+	}
+	ldflags := []string{""} // Garble will automatically add "-s -w -buildid="
 	if !config.Debug && goConfig.GOOS == WINDOWS {
 		ldflags[0] += " -H=windowsgui"
 	}
-	gcflags := ""
-	asmflags := ""
+	gcFlags := ""
+	asmFlags := ""
 	if config.Debug {
-		gcflags = "all=-N -l"
+		gcFlags = "all=-N -l"
 		ldflags = []string{}
 	}
-	// trimpath is now a separate flag since Go 1.13
-	trimpath := ""
-	if !config.Debug {
-		trimpath = "-trimpath"
-	}
-	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "", tags, ldflags, gcflags, asmflags, trimpath)
+	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "", tags, ldflags, gcFlags, asmFlags)
 	if err != nil {
 		return "", err
 	}
-	config.FileName = filepath.Base(dest)
-	if save {
-		err = ImplantBuildSave(name, config, dest)
-		if err != nil {
-			buildLog.Errorf("Failed to save build: %s", err)
-		}
-	}
+
 	return dest, err
 }
 
 // This function is a little too long, we should probably refactor it as some point
-func renderSliverGoCode(name string, otpSecret string, config *models.ImplantConfig, goConfig *gogo.GoConfig) (string, error) {
+func renderSliverGoCode(name string, build *clientpb.ImplantBuild, config *clientpb.ImplantConfig, goConfig *gogo.GoConfig, pbC2Implant *clientpb.HTTPC2ImplantConfig) (string, error) {
 	target := fmt.Sprintf("%s/%s", config.GOOS, config.GOARCH)
 	if _, ok := gogo.ValidCompilerTargets(*goConfig)[target]; !ok {
 		return "", fmt.Errorf("invalid compiler target: %s", target)
@@ -475,7 +392,7 @@ func renderSliverGoCode(name string, otpSecret string, config *models.ImplantCon
 	}
 
 	buildLog.Debugf("Generating new sliver binary '%s'", name)
-
+	pbC2Implant = models.RandomizeImplantConfig(pbC2Implant, config.GOOS, config.GOARCH)
 	sliversDir := GetSliversDir() // ~/.sliver/slivers
 	projectGoPathDir := filepath.Join(sliversDir, config.GOOS, config.GOARCH, filepath.Base(name))
 	if _, err := os.Stat(projectGoPathDir); os.IsNotExist(err) {
@@ -540,32 +457,50 @@ func renderSliverGoCode(name string, otpSecret string, config *models.ImplantCon
 		if err != nil {
 			return err
 		}
-		buf := bytes.NewBuffer([]byte{})
-		buildLog.Debugf("[render] %s -> %s", f.Name(), sliverCodePath)
+		if !util.Contains([]string{".go", ".c", ".h"}, path.Ext(f.Name())) {
+			buildLog.Debugf("Skipping render for %s, does not appear to be source code file", f.Name())
+			_, err = fSliver.Write(sliverGoCodeRaw)
+			return err
+		}
+
+		encoderStruct := utilEncoders.EncodersList{
+			Base32EncoderID:  encoders.Base32EncoderID,
+			Base58EncoderID:  encoders.Base58EncoderID,
+			Base64EncoderID:  encoders.Base64EncoderID,
+			EnglishEncoderID: encoders.EnglishEncoderID,
+			GzipEncoderID:    encoders.GzipEncoderID,
+			HexEncoderID:     encoders.HexEncoderID,
+			PNGEncoderID:     encoders.PNGEncoderID,
+		}
 
 		// --------------
 		// Render Code
 		// --------------
-		sliverCodeTmpl := template.New("sliver")
-		sliverCodeTmpl, err = sliverCodeTmpl.Funcs(template.FuncMap{
+		buf := bytes.NewBuffer([]byte{})
+		buildLog.Debugf("[render] %s -> %s", f.Name(), sliverCodePath)
+
+		sliverCode := template.New("sliver")
+		sliverCode, err = sliverCode.Funcs(template.FuncMap{
 			"GenerateUserAgent": func() string {
-				return configs.GetHTTPC2Config().GenerateUserAgent(config.GOOS, config.GOARCH)
+				return "" // renerateUserAgent(config.GOOS, config.GOARCH)
 			},
 		}).Parse(sliverGoCode)
 		if err != nil {
 			buildLog.Errorf("Template parsing error %s", err)
 			return err
 		}
-		err = sliverCodeTmpl.Execute(buf, struct {
+		err = sliverCode.Execute(buf, struct {
 			Name                string
-			Config              *models.ImplantConfig
-			OTPSecret           string
-			HTTPC2ImplantConfig *configs.HTTPC2ImplantConfig
+			Config              *clientpb.ImplantConfig
+			Build               *clientpb.ImplantBuild
+			HTTPC2ImplantConfig *clientpb.HTTPC2ImplantConfig
+			Encoders            utilEncoders.EncodersList
 		}{
 			name,
 			config,
-			otpSecret,
-			configs.GetHTTPC2Config().RandomImplantConfig(),
+			build,
+			pbC2Implant,
+			encoderStruct,
 		})
 		if err != nil {
 			buildLog.Errorf("Template execution error %s", err)
@@ -576,19 +511,18 @@ func renderSliverGoCode(name string, otpSecret string, config *models.ImplantCon
 		if len(config.CanaryDomains) > 0 {
 			buildLog.Debugf("Canary domain(s): %v", config.CanaryDomains)
 		}
-		canaryTmpl := template.New("canary").Delims("[[", "]]")
+		canaryTemplate := template.New("canary").Delims("[[", "]]")
 		canaryGenerator := &CanaryGenerator{
 			ImplantName:   name,
-			ParentDomains: config.CanaryDomainsList(),
+			ParentDomains: config.CanaryDomains,
 		}
-		canaryTmpl, err = canaryTmpl.Funcs(template.FuncMap{
+		canaryTemplate, err = canaryTemplate.Funcs(template.FuncMap{
 			"GenerateCanary": canaryGenerator.GenerateCanary,
 		}).Parse(buf.String())
 		if err != nil {
 			return err
 		}
-		err = canaryTmpl.Execute(fSliver, canaryGenerator)
-
+		err = canaryTemplate.Execute(fSliver, canaryGenerator)
 		if err != nil {
 			buildLog.Debugf("Failed to render go code: %s", err)
 			return err
@@ -597,6 +531,12 @@ func renderSliverGoCode(name string, otpSecret string, config *models.ImplantCon
 	})
 	if err != nil {
 		return "", err
+	}
+
+	// Render encoder assets
+	renderNativeEncoderAssets(build, config, sliverPkgDir)
+	if config.TrafficEncodersEnabled {
+		renderTrafficEncoderAssets(build, config, sliverPkgDir)
 	}
 
 	// Render GoMod
@@ -637,66 +577,186 @@ func renderSliverGoCode(name string, otpSecret string, config *models.ImplantCon
 	return sliverPkgDir, nil
 }
 
-// GenerateConfig - Generate the keys/etc for the implant
-func GenerateConfig(name string, config *models.ImplantConfig, save bool) error {
-	var err error
+// renderTrafficEncoderAssets - Copies and compresses any enabled WASM traffic encoders
+func renderTrafficEncoderAssets(build *clientpb.ImplantBuild, config *clientpb.ImplantConfig, sliverPkgDir string) {
+	buildLog.Infof("Rendering traffic encoder assets ...")
+	encoderAssetsPath := filepath.Join(sliverPkgDir, "implant", "sliver", "encoders", "assets")
+	for _, asset := range config.Assets {
+		if !strings.HasSuffix(asset.Name, ".wasm") {
+			continue
+		}
+		wasm, err := encoders.TrafficEncoderFS.ReadFile(asset.Name)
+		if err != nil {
+			buildLog.Errorf("Failed to read %s: %v", asset.Name, err)
+			continue
+		}
+		saveAssetPath := filepath.Join(encoderAssetsPath, filepath.Base(asset.Name))
+		compressedWasm, _ := encoders.Gzip.Encode(wasm)
+		buildLog.Infof("Embed traffic encoder %s (%s, %s compressed)",
+			asset.Name, util.ByteCountBinary(int64(len(wasm))), util.ByteCountBinary(int64(len(compressedWasm))))
+		err = os.WriteFile(saveAssetPath, compressedWasm, 0600)
+		if err != nil {
+			buildLog.Errorf("Failed to write %s: %v", saveAssetPath, err)
+			continue
+		}
+	}
+}
 
-	config.MTLSc2Enabled = isC2Enabled([]string{"mtls"}, config.C2)
-	config.WGc2Enabled = isC2Enabled([]string{"wg"}, config.C2)
-	config.HTTPc2Enabled = isC2Enabled([]string{"http", "https"}, config.C2)
-	config.DNSc2Enabled = isC2Enabled([]string{"dns"}, config.C2)
-	config.NamePipec2Enabled = isC2Enabled([]string{"namedpipe"}, config.C2)
-	config.TCPPivotc2Enabled = isC2Enabled([]string{"tcppivot"}, config.C2)
+// renderNativeEncoderAssets - Render native encoder assets such as the english dictionary file
+func renderNativeEncoderAssets(build *clientpb.ImplantBuild, config *clientpb.ImplantConfig, sliverPkgDir string) {
+	buildLog.Infof("Rendering native encoder assets ...")
+	encoderAssetsPath := filepath.Join(sliverPkgDir, "implant", "sliver", "encoders", "assets")
+
+	// English assets
+	dictionary := renderImplantEnglish()
+	dictionaryPath := filepath.Join(encoderAssetsPath, "english.gz")
+	data := []byte(strings.Join(dictionary, "\n"))
+	compressedData, _ := encoders.Gzip.Encode(data)
+	buildLog.Infof("Embed english dictionary (%s, %s compressed)",
+		util.ByteCountBinary(int64(len(data))), util.ByteCountBinary(int64(len(compressedData))))
+	err := os.WriteFile(dictionaryPath, compressedData, 0600)
+	if err != nil {
+		buildLog.Errorf("Failed to write %s: %v", dictionaryPath, err)
+	}
+}
+
+// renderImplantEnglish - Render the english dictionary file, ensures that the returned dictionary
+// contains at least one word that will encode to a given byte value (0-255). There is also a default
+// dictionary that we'll try to overwrite (the default one is in the git repo).
+func renderImplantEnglish() []string {
+	allWords := assets.English() // 178,543 words -> server/assets/fs/english.txt
+	meRiCaN := cases.Title(language.AmericanEnglish)
+	for i := 0; i < len(allWords); i++ {
+		switch insecureRand.Intn(3) {
+		case 0:
+			allWords[i] = strings.ToUpper(allWords[i])
+		case 1:
+			allWords[i] = strings.ToLower(allWords[i])
+		case 2:
+			allWords[i] = meRiCaN.String(allWords[i])
+		}
+	}
+
+	// Calculate the sum for each word
+	allWordsDictionary := map[int][]string{}
+	for _, word := range allWords {
+		word = strings.TrimSpace(word)
+		sum := utilEncoders.SumWord(word)
+		allWordsDictionary[sum] = append(allWordsDictionary[sum], word)
+	}
+
+	// Shuffle the words for each byte value
+	for byteValue := 0; byteValue < 256; byteValue++ {
+		insecureRand.Shuffle(len(allWordsDictionary[byteValue]), func(i, j int) {
+			allWordsDictionary[byteValue][i], allWordsDictionary[byteValue][j] = allWordsDictionary[byteValue][j], allWordsDictionary[byteValue][i]
+		})
+	}
+
+	// Build the implant's dictionary, two words per-byte value
+	implantDictionary := []string{}
+	for byteValue := 0; byteValue < 256; byteValue++ {
+		wordsForByteValue := allWordsDictionary[byteValue]
+		implantDictionary = append(implantDictionary, wordsForByteValue[0])
+		if 1 < len(wordsForByteValue) {
+			implantDictionary = append(implantDictionary, wordsForByteValue[1])
+		}
+	}
+	return implantDictionary
+}
+
+func renderChromeUserAgent(implantConfig *clientpb.HTTPC2ImplantConfig, goos string, goarch string) string {
+	if implantConfig.UserAgent == "" {
+		switch goos {
+		case "windows":
+			switch goarch {
+			case "amd64":
+				return fmt.Sprintf("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", renderChromeVer(implantConfig))
+			}
+
+		case "linux":
+			switch goarch {
+			case "amd64":
+				return fmt.Sprintf("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", renderChromeVer(implantConfig))
+			}
+
+		case "darwin":
+			switch goarch {
+			case "arm64":
+				fallthrough // https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/renderer/core/frame/navigator_id.cc;l=76
+			case "amd64":
+				return fmt.Sprintf("Mozilla/5.0 (Macintosh; Intel Mac OS X %s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", renderMacOSVer(implantConfig), renderChromeVer(implantConfig))
+			}
+
+		}
+	} else {
+		return implantConfig.UserAgent
+	}
+
+	// Default is a generic Windows/Chrome
+	return fmt.Sprintf("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", renderChromeVer(implantConfig))
+}
+
+func renderChromeVer(implantConfig *clientpb.HTTPC2ImplantConfig) string {
+	return ""
+}
+
+func renderMacOSVer(implantConfig *clientpb.HTTPC2ImplantConfig) string {
+	return ""
+}
+
+// GenerateConfig - Generate the keys/etc for the implant
+func GenerateConfig(name string, implantConfig *clientpb.ImplantConfig) (*clientpb.ImplantBuild, error) {
+	var err error
 
 	// Cert PEM encoded certificates
 	serverCACert, _, _ := certs.GetCertificateAuthorityPEM(certs.MtlsServerCA)
 	sliverCert, sliverKey, err := certs.MtlsC2ImplantGenerateECCCertificate(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// ECC keys
-	implantKeyPair, err := cryptography.RandomECCKeyPair()
-	if err != nil {
-		return err
+	build := clientpb.ImplantBuild{
+		Name: name,
 	}
-	serverKeyPair := cryptography.ECCServerKeyPair()
-	digest := sha256.Sum256((*implantKeyPair.Public)[:])
-	config.ECCPublicKey = implantKeyPair.PublicBase64()
-	config.ECCPublicKeyDigest = hex.EncodeToString(digest[:])
-	config.ECCPrivateKey = implantKeyPair.PrivateBase64()
-	config.ECCPublicKeySignature = cryptography.MinisignServerSign(implantKeyPair.Public[:])
-	config.ECCServerPublicKey = serverKeyPair.PublicBase64()
-	config.MinisignServerPublicKey = cryptography.MinisignServerPublicKey()
+
+	// ECC keys - only generate if config is not set
+	implantKeyPair, err := cryptography.RandomAgeKeyPair()
+	if err != nil {
+		return nil, err
+	}
+	serverKeyPair := cryptography.AgeServerKeyPair()
+	digest := sha256.Sum256([]byte(implantKeyPair.Public))
+	build.PeerPublicKey = implantKeyPair.Public
+	build.PeerPublicKeyDigest = hex.EncodeToString(digest[:])
+	build.PeerPrivateKey = implantKeyPair.Private
+	build.PeerPublicKeySignature = cryptography.MinisignServerSign([]byte(implantKeyPair.Public))
+	build.AgeServerPublicKey = serverKeyPair.Public
+	build.MinisignServerPublicKey = cryptography.MinisignServerPublicKey()
 
 	// MTLS keys
-	if config.MTLSc2Enabled {
-		config.MtlsCACert = string(serverCACert)
-		config.MtlsCert = string(sliverCert)
-		config.MtlsKey = string(sliverKey)
+	if models.IsC2Enabled([]string{"mtls"}, implantConfig.C2) {
+		build.MtlsCACert = string(serverCACert)
+		build.MtlsCert = string(sliverCert)
+		build.MtlsKey = string(sliverKey)
 	}
 
 	// Generate wg Keys as needed
-	if config.WGc2Enabled {
-		implantPrivKey, _, err := certs.ImplantGenerateWGKeys(config.WGPeerTunIP)
+	if models.IsC2Enabled([]string{"wg"}, implantConfig.C2) {
+		implantPrivKey, _, err := certs.ImplantGenerateWGKeys(implantConfig.WGPeerTunIP)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		_, serverPubKey, err := certs.GetWGServerKeys()
 		if err != nil {
-			return fmt.Errorf("failed to embed implant wg keys: %s", err)
+			return nil, fmt.Errorf("failed to embed implant wg keys: %s", err)
 		}
-		config.WGImplantPrivKey = implantPrivKey
-		config.WGServerPubKey = serverPubKey
+		build.WGImplantPrivKey = implantPrivKey
+		build.WGServerPubKey = serverPubKey
 	}
 
-	if save {
-		err = ImplantConfigSave(config)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	build.Stage = false
+
+	return &build, nil
 }
 
 // Platform specific ENV VARS take precedence over generic
@@ -929,13 +989,14 @@ func getGoHttpsProxy() string {
 }
 
 const (
-	// The wireguard garble bug appears to have been fixed.
-	// Updated the wgGoPrivate to "*"
-	// wgGoPrivate  = "*"
 	allGoPrivate = "*"
 )
 
-func goPrivate(config *models.ImplantConfig) string {
+// goGarble - Can be used to conditionally modify the GOGARBLE env variable
+// this is currently set to '*' (all packages) however in the past we've had
+// to carve out specific packages, so we left this here just in case we need
+// it in the future.
+func goGarble(config *clientpb.ImplantConfig) string {
 	// for _, c2 := range config.C2 {
 	// 	uri, err := url.Parse(c2.URL)
 	// 	if err != nil {

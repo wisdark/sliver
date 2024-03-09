@@ -20,16 +20,16 @@ package cursed
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/bishopfox/sliver/client/console"
 	"github.com/bishopfox/sliver/client/overlord"
-	"github.com/desertbit/grumble"
+	"github.com/spf13/cobra"
 )
 
-func CursedCookiesCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+func CursedCookiesCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	curse := selectCursedProcess(con)
 	if curse == nil {
 		return
@@ -46,7 +46,7 @@ func CursedCookiesCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	if len(cookies) == 0 {
 		return
 	}
-	saveFile := ctx.Flags.String("save")
+	saveFile, _ := cmd.Flags().GetString("save")
 	if saveFile == "" {
 		saveFile = fmt.Sprintf("cookies-%s.json", time.Now().Format("20060102150405"))
 	}
@@ -59,7 +59,7 @@ func CursedCookiesCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 		}
 		jsonCookies = append(jsonCookies, string(jsonCookie))
 	}
-	err = ioutil.WriteFile(saveFile, []byte(strings.Join(jsonCookies, "\n")), 0600)
+	err = os.WriteFile(saveFile, []byte(strings.Join(jsonCookies, "\n")), 0o600)
 	if err != nil {
 		con.PrintErrorf("Failed to save cookies: %s\n", err)
 		return

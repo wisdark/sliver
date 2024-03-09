@@ -26,6 +26,7 @@ type AddScriptToEvaluateOnNewDocumentParams struct {
 	Source                string `json:"source"`
 	WorldName             string `json:"worldName,omitempty"`             // If specified, creates an isolated world with the given name and evaluates given script in it. This world name will be used as the ExecutionContextDescription::name when the corresponding event is emitted.
 	IncludeCommandLineAPI bool   `json:"includeCommandLineAPI,omitempty"` // Specifies whether command line API should be available to the script, defaults to false.
+	RunImmediately        bool   `json:"runImmediately,omitempty"`        // If true, runs the script immediately on existing execution contexts or worlds. Default: false.
 }
 
 // AddScriptToEvaluateOnNewDocument evaluates given script in every frame
@@ -54,6 +55,13 @@ func (p AddScriptToEvaluateOnNewDocumentParams) WithWorldName(worldName string) 
 // available to the script, defaults to false.
 func (p AddScriptToEvaluateOnNewDocumentParams) WithIncludeCommandLineAPI(includeCommandLineAPI bool) *AddScriptToEvaluateOnNewDocumentParams {
 	p.IncludeCommandLineAPI = includeCommandLineAPI
+	return &p
+}
+
+// WithRunImmediately if true, runs the script immediately on existing
+// execution contexts or worlds. Default: false.
+func (p AddScriptToEvaluateOnNewDocumentParams) WithRunImmediately(runImmediately bool) *AddScriptToEvaluateOnNewDocumentParams {
+	p.RunImmediately = runImmediately
 	return &p
 }
 
@@ -373,43 +381,6 @@ func (p *GetInstallabilityErrorsParams) Do(ctx context.Context) (installabilityE
 	}
 
 	return res.InstallabilityErrors, nil
-}
-
-// GetManifestIconsParams [no description].
-type GetManifestIconsParams struct{}
-
-// GetManifestIcons [no description].
-//
-// See: https://chromedevtools.github.io/devtools-protocol/tot/Page#method-getManifestIcons
-func GetManifestIcons() *GetManifestIconsParams {
-	return &GetManifestIconsParams{}
-}
-
-// GetManifestIconsReturns return values.
-type GetManifestIconsReturns struct {
-	PrimaryIcon string `json:"primaryIcon,omitempty"`
-}
-
-// Do executes Page.getManifestIcons against the provided context.
-//
-// returns:
-//
-//	primaryIcon
-func (p *GetManifestIconsParams) Do(ctx context.Context) (primaryIcon []byte, err error) {
-	// execute
-	var res GetManifestIconsReturns
-	err = cdp.Execute(ctx, CommandGetManifestIcons, nil, &res)
-	if err != nil {
-		return nil, err
-	}
-
-	// decode
-	var dec []byte
-	dec, err = base64.StdEncoding.DecodeString(res.PrimaryIcon)
-	if err != nil {
-		return nil, err
-	}
-	return dec, nil
 }
 
 // GetAppIDParams returns the unique (PWA) app id. Only returns values if the
@@ -840,6 +811,7 @@ type PrintToPDFParams struct {
 	FooterTemplate      string                 `json:"footerTemplate,omitempty"`      // HTML template for the print footer. Should use the same format as the headerTemplate.
 	PreferCSSPageSize   bool                   `json:"preferCSSPageSize,omitempty"`   // Whether or not to prefer page size as defined by css. Defaults to false, in which case the content will be scaled to fit the paper size.
 	TransferMode        PrintToPDFTransferMode `json:"transferMode,omitempty"`        // return as stream
+	GenerateTaggedPDF   bool                   `json:"generateTaggedPDF,omitempty"`   // Whether or not to generate tagged (accessible) PDF. Defaults to embedder choice.
 }
 
 // PrintToPDF print page as PDF.
@@ -952,6 +924,13 @@ func (p PrintToPDFParams) WithPreferCSSPageSize(preferCSSPageSize bool) *PrintTo
 // WithTransferMode return as stream.
 func (p PrintToPDFParams) WithTransferMode(transferMode PrintToPDFTransferMode) *PrintToPDFParams {
 	p.TransferMode = transferMode
+	return &p
+}
+
+// WithGenerateTaggedPDF whether or not to generate tagged (accessible) PDF.
+// Defaults to embedder choice.
+func (p PrintToPDFParams) WithGenerateTaggedPDF(generateTaggedPDF bool) *PrintToPDFParams {
+	p.GenerateTaggedPDF = generateTaggedPDF
 	return &p
 }
 
@@ -1580,7 +1559,7 @@ func (p *ClearCompilationCacheParams) Do(ctx context.Context) (err error) {
 // transaction mode.
 // https://w3c.github.io/secure-payment-confirmation/#sctn-automation-set-spc-transaction-mode.
 type SetSPCTransactionModeParams struct {
-	Mode SetSPCTransactionModeMode `json:"mode"`
+	Mode AutoResponseMode `json:"mode"`
 }
 
 // SetSPCTransactionMode sets the Secure Payment Confirmation transaction
@@ -1592,7 +1571,7 @@ type SetSPCTransactionModeParams struct {
 // parameters:
 //
 //	mode
-func SetSPCTransactionMode(mode SetSPCTransactionModeMode) *SetSPCTransactionModeParams {
+func SetSPCTransactionMode(mode AutoResponseMode) *SetSPCTransactionModeParams {
 	return &SetSPCTransactionModeParams{
 		Mode: mode,
 	}
@@ -1601,6 +1580,31 @@ func SetSPCTransactionMode(mode SetSPCTransactionModeMode) *SetSPCTransactionMod
 // Do executes Page.setSPCTransactionMode against the provided context.
 func (p *SetSPCTransactionModeParams) Do(ctx context.Context) (err error) {
 	return cdp.Execute(ctx, CommandSetSPCTransactionMode, p, nil)
+}
+
+// SetRPHRegistrationModeParams extensions for Custom Handlers API:
+// https://html.spec.whatwg.org/multipage/system-state.html#rph-automation.
+type SetRPHRegistrationModeParams struct {
+	Mode AutoResponseMode `json:"mode"`
+}
+
+// SetRPHRegistrationMode extensions for Custom Handlers API:
+// https://html.spec.whatwg.org/multipage/system-state.html#rph-automation.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Page#method-setRPHRegistrationMode
+//
+// parameters:
+//
+//	mode
+func SetRPHRegistrationMode(mode AutoResponseMode) *SetRPHRegistrationModeParams {
+	return &SetRPHRegistrationModeParams{
+		Mode: mode,
+	}
+}
+
+// Do executes Page.setRPHRegistrationMode against the provided context.
+func (p *SetRPHRegistrationModeParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandSetRPHRegistrationMode, p, nil)
 }
 
 // GenerateTestReportParams generates a report for testing.
@@ -1679,6 +1683,37 @@ func (p *SetInterceptFileChooserDialogParams) Do(ctx context.Context) (err error
 	return cdp.Execute(ctx, CommandSetInterceptFileChooserDialog, p, nil)
 }
 
+// SetPrerenderingAllowedParams enable/disable prerendering manually. This
+// command is a short-term solution for https://crbug.com/1440085. See
+// https://docs.google.com/document/d/12HVmFxYj5Jc-eJr5OmWsa2bqTJsbgGLKI6ZIyx0_wpA
+// for more details. TODO(https://crbug.com/1440085): Remove this once Puppeteer
+// supports tab targets.
+type SetPrerenderingAllowedParams struct {
+	IsAllowed bool `json:"isAllowed"`
+}
+
+// SetPrerenderingAllowed enable/disable prerendering manually. This command
+// is a short-term solution for https://crbug.com/1440085. See
+// https://docs.google.com/document/d/12HVmFxYj5Jc-eJr5OmWsa2bqTJsbgGLKI6ZIyx0_wpA
+// for more details. TODO(https://crbug.com/1440085): Remove this once Puppeteer
+// supports tab targets.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Page#method-setPrerenderingAllowed
+//
+// parameters:
+//
+//	isAllowed
+func SetPrerenderingAllowed(isAllowed bool) *SetPrerenderingAllowedParams {
+	return &SetPrerenderingAllowedParams{
+		IsAllowed: isAllowed,
+	}
+}
+
+// Do executes Page.setPrerenderingAllowed against the provided context.
+func (p *SetPrerenderingAllowedParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandSetPrerenderingAllowed, p, nil)
+}
+
 // Command names.
 const (
 	CommandAddScriptToEvaluateOnNewDocument    = "Page.addScriptToEvaluateOnNewDocument"
@@ -1690,7 +1725,6 @@ const (
 	CommandEnable                              = "Page.enable"
 	CommandGetAppManifest                      = "Page.getAppManifest"
 	CommandGetInstallabilityErrors             = "Page.getInstallabilityErrors"
-	CommandGetManifestIcons                    = "Page.getManifestIcons"
 	CommandGetAppID                            = "Page.getAppId"
 	CommandGetAdScriptID                       = "Page.getAdScriptId"
 	CommandGetFrameTree                        = "Page.getFrameTree"
@@ -1725,7 +1759,9 @@ const (
 	CommandAddCompilationCache                 = "Page.addCompilationCache"
 	CommandClearCompilationCache               = "Page.clearCompilationCache"
 	CommandSetSPCTransactionMode               = "Page.setSPCTransactionMode"
+	CommandSetRPHRegistrationMode              = "Page.setRPHRegistrationMode"
 	CommandGenerateTestReport                  = "Page.generateTestReport"
 	CommandWaitForDebugger                     = "Page.waitForDebugger"
 	CommandSetInterceptFileChooserDialog       = "Page.setInterceptFileChooserDialog"
+	CommandSetPrerenderingAllowed              = "Page.setPrerenderingAllowed"
 )

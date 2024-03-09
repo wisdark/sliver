@@ -16,7 +16,7 @@ package tcpip
 
 import (
 	"gvisor.dev/gvisor/pkg/atomicbitops"
-	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/sync"
 )
 
@@ -63,6 +63,10 @@ type SocketOptionsHandler interface {
 	// changed. The handler notifies the writers if the send buffer size is
 	// increased with setsockopt(2) for TCP endpoints.
 	WakeupWriters()
+
+	// GetAcceptConn returns true if the socket is a TCP socket and is in
+	// listening state.
+	GetAcceptConn() bool
 }
 
 // DefaultSocketOptionsHandler is an embeddable type that implements no-op
@@ -112,11 +116,16 @@ func (*DefaultSocketOptionsHandler) OnSetReceiveBufferSize(v, oldSz int64) (newS
 	return v, nil
 }
 
+// GetAcceptConn implements SocketOptionsHandler.GetAcceptConn.
+func (*DefaultSocketOptionsHandler) GetAcceptConn() bool {
+	return false
+}
+
 // StackHandler holds methods to access the stack options. These must be
 // implemented by the stack.
 type StackHandler interface {
 	// Option allows retrieving stack wide options.
-	Option(option interface{}) Error
+	Option(option any) Error
 
 	// TransportProtocolOption allows retrieving individual protocol level
 	// option values.
@@ -606,7 +615,7 @@ type SockError struct {
 	Cause SockErrorCause
 
 	// Payload is the errant packet's payload.
-	Payload *bufferv2.View
+	Payload *buffer.View
 	// Dst is the original destination address of the errant packet.
 	Dst FullAddress
 	// Offender is the original sender address of the errant packet.
@@ -653,7 +662,7 @@ func (so *SocketOptions) QueueErr(err *SockError) {
 }
 
 // QueueLocalErr queues a local error onto the local queue.
-func (so *SocketOptions) QueueLocalErr(err Error, net NetworkProtocolNumber, info uint32, dst FullAddress, payload *bufferv2.View) {
+func (so *SocketOptions) QueueLocalErr(err Error, net NetworkProtocolNumber, info uint32, dst FullAddress, payload *buffer.View) {
 	so.QueueErr(&SockError{
 		Err:      err,
 		Cause:    &LocalSockError{info: info},
@@ -741,4 +750,9 @@ func (so *SocketOptions) GetRcvlowat() int32 {
 func (so *SocketOptions) SetRcvlowat(rcvlowat int32) Error {
 	so.rcvlowat.Store(rcvlowat)
 	return nil
+}
+
+// GetAcceptConn gets value for SO_ACCEPTCONN option.
+func (so *SocketOptions) GetAcceptConn() bool {
+	return so.handler.GetAcceptConn()
 }

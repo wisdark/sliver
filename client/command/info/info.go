@@ -27,22 +27,37 @@ import (
 	consts "github.com/bishopfox/sliver/client/constants"
 	"github.com/bishopfox/sliver/protobuf/clientpb"
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
+	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/desertbit/grumble"
 )
 
-// InfoCmd - Display information about the active session
-func InfoCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// InfoCmd - Display information about the active session.
+func InfoCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	var err error
 
 	// Check if we have an active target via 'use'
 	session, beacon := con.ActiveTarget.Get()
 
-	idArg := ctx.Args.String("session")
-	if idArg != "" {
+	if len(args) > 0 {
 		// ID passed via argument takes priority
+		idArg := args[0]
 		session, beacon, err = use.SessionOrBeaconByID(idArg, con)
+		if err != nil {
+			con.PrintErrorf("%s\n", err)
+			return
+		}
+	} else if session != nil || beacon != nil {
+		currID := ""
+		if session != nil {
+			currID = session.ID
+		} else {
+			currID = beacon.ID
+		}
+		session, beacon, err = use.SessionOrBeaconByID(currID, con)
+		if err != nil {
+			con.PrintErrorf("%s\n", err)
+			return
+		}
 	} else {
 		if session == nil && beacon == nil {
 			session, beacon, err = use.SelectSessionOrBeacon(con)
@@ -102,8 +117,8 @@ func InfoCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-// PIDCmd - Get the active session's PID
-func PIDCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// PIDCmd - Get the active session's PID.
+func PIDCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	session, beacon := con.ActiveTarget.GetInteractive()
 	if session == nil && beacon == nil {
 		return
@@ -115,8 +130,8 @@ func PIDCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-// UIDCmd - Get the active session's UID
-func UIDCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// UIDCmd - Get the active session's UID.
+func UIDCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	session, beacon := con.ActiveTarget.GetInteractive()
 	if session == nil && beacon == nil {
 		return
@@ -128,8 +143,8 @@ func UIDCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-// GIDCmd - Get the active session's GID
-func GIDCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// GIDCmd - Get the active session's GID.
+func GIDCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	session, beacon := con.ActiveTarget.GetInteractive()
 	if session == nil && beacon == nil {
 		return
@@ -141,8 +156,8 @@ func GIDCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-// WhoamiCmd - Displays the current user of the active session
-func WhoamiCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// WhoamiCmd - Displays the current user of the active session.
+func WhoamiCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	session, beacon := con.ActiveTarget.GetInteractive()
 	if session == nil && beacon == nil {
 		return
@@ -164,7 +179,7 @@ func WhoamiCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 
 	if isWin {
 		cto, err := con.Rpc.CurrentTokenOwner(context.Background(), &sliverpb.CurrentTokenOwnerReq{
-			Request: con.ActiveTarget.Request(ctx),
+			Request: con.ActiveTarget.Request(cmd),
 		})
 		if err != nil {
 			con.PrintErrorf("%s\n", err)
@@ -187,7 +202,7 @@ func WhoamiCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	}
 }
 
-func PrintTokenOwner(cto *sliverpb.CurrentTokenOwner, con *console.SliverConsoleClient) {
+func PrintTokenOwner(cto *sliverpb.CurrentTokenOwner, con *console.SliverClient) {
 	if cto.Response != nil && cto.Response.Err != "" {
 		con.PrintErrorf("%s\n", cto.Response.Err)
 		return

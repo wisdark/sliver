@@ -28,12 +28,14 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/bishopfox/sliver/client/core"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/storage"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+
+	"github.com/bishopfox/sliver/client/core"
 )
 
 const (
@@ -275,7 +277,7 @@ func DumpCookies(curse *core.CursedProcess, webSocketURL string) ([]*network.Coo
 	dumpCookieTasks := chromedp.Tasks{
 		// read network values
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			cookies, err = network.GetCookies().Do(ctx)
+			cookies, err = storage.GetCookies().Do(ctx)
 			if err != nil {
 				return err
 			}

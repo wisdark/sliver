@@ -25,11 +25,11 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/bishopfox/sliver/client/console"
 	"github.com/bishopfox/sliver/client/core"
-	"github.com/desertbit/grumble"
+	"github.com/spf13/cobra"
 )
 
-// ReactionSaveCmd - Manage reactions to events
-func ReactionSaveCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+// ReactionSaveCmd - Manage reactions to events.
+func ReactionSaveCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	reactionPath := GetReactionFilePath()
 	if _, err := os.Stat(reactionPath); !os.IsNotExist(err) {
 		confirm := false

@@ -17,7 +17,7 @@ package ipv6
 import (
 	"fmt"
 
-	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
@@ -164,7 +164,7 @@ func (e *endpoint) checkLocalAddress(addr tcpip.Address) bool {
 // the original packet that caused the ICMP one to be sent. This information is
 // used to find out which transport endpoint must be notified about the ICMP
 // packet.
-func (e *endpoint) handleControl(transErr stack.TransportError, pkt *stack.PacketBuffer) {
+func (e *endpoint) handleControl(transErr stack.TransportError, pkt stack.PacketBufferPtr) {
 	h, ok := pkt.Data().PullUp(header.IPv6MinimumSize)
 	if !ok {
 		return
@@ -267,7 +267,7 @@ func getTargetLinkAddr(it header.NDPOptionIterator) (tcpip.LinkAddress, bool) {
 	})
 }
 
-func isMLDValid(pkt *stack.PacketBuffer, iph header.IPv6, routerAlert *header.IPv6RouterAlertOption) bool {
+func isMLDValid(pkt stack.PacketBufferPtr, iph header.IPv6, routerAlert *header.IPv6RouterAlertOption) bool {
 	// As per RFC 2710 section 3:
 	//   All MLD messages described in this document are sent with a link-local
 	//   IPv6 Source Address, an IPv6 Hop Limit of 1, and an IPv6 Router Alert
@@ -287,7 +287,7 @@ func isMLDValid(pkt *stack.PacketBuffer, iph header.IPv6, routerAlert *header.IP
 	return true
 }
 
-func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, routerAlert *header.IPv6RouterAlertOption) {
+func (e *endpoint) handleICMP(pkt stack.PacketBufferPtr, hasFragmentHeader bool, routerAlert *header.IPv6RouterAlertOption) {
 	sent := e.stats.icmp.packetsSent
 	received := e.stats.icmp.packetsReceived
 	h := header.ICMPv6(pkt.TransportHeader().Slice())
@@ -300,7 +300,7 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 	dstAddr := iph.DestinationAddress()
 
 	// Validate ICMPv6 checksum before processing the packet.
-	payload := pkt.Data().AsRange()
+	payload := pkt.Data()
 	if got, want := h.Checksum(), header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
 		Header:      h,
 		Src:         srcAddr,
@@ -540,6 +540,7 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 		//
 		na.SetSolicitedFlag(!unspecifiedSource)
 		na.SetOverrideFlag(true)
+		na.SetRouterFlag(e.Forwarding())
 		na.SetTargetAddress(targetAddr)
 		na.Options().Serialize(optsSerializer)
 		packet.SetChecksum(header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
@@ -595,7 +596,7 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 
 			// We just got an NA from a node that owns an address we are performing
 			// DAD on, implying the address is not unique. In this case we let the
-			// stack know so it can handle such a scenario and do nothing furthur with
+			// stack know so it can handle such a scenario and do nothing further with
 			// the NDP NA.
 			//
 			// We would get an error if the address no longer exists or the address
@@ -658,7 +659,7 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 		// source addresses in IPv6 packets.
 		localAddr := dstAddr
 		if header.IsV6MulticastAddress(dstAddr) {
-			localAddr = ""
+			localAddr = tcpip.Address{}
 		}
 
 		r, err := e.protocol.stack.FindRoute(e.nic.ID(), localAddr, srcAddr, ProtocolNumber, false /* multicastLoop */)
@@ -682,13 +683,13 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 		replyPkt.TransportProtocolNumber = header.ICMPv6ProtocolNumber
 		copy(icmp, h)
 		icmp.SetType(header.ICMPv6EchoReply)
-		dataRange := replyPkt.Data().AsRange()
+		replyData := replyPkt.Data()
 		icmp.SetChecksum(header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
 			Header:      icmp,
 			Src:         r.LocalAddress(),
 			Dst:         r.RemoteAddress(),
-			PayloadCsum: dataRange.Checksum(),
-			PayloadLen:  dataRange.Size(),
+			PayloadCsum: replyData.Checksum(),
+			PayloadLen:  replyData.Size(),
 		}))
 		replyTClass, _ := iph.TOS()
 		if err := r.WritePacket(stack.NetworkHeaderParams{
@@ -852,12 +853,18 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 			return
 		}
 
-	case header.ICMPv6MulticastListenerQuery, header.ICMPv6MulticastListenerReport, header.ICMPv6MulticastListenerDone:
+	case header.ICMPv6MulticastListenerQuery,
+		header.ICMPv6MulticastListenerReport,
+		header.ICMPv6MulticastListenerV2Report,
+		header.ICMPv6MulticastListenerDone:
+		icmpBody := h.MessageBody()
 		switch icmpType {
 		case header.ICMPv6MulticastListenerQuery:
 			received.multicastListenerQuery.Increment()
 		case header.ICMPv6MulticastListenerReport:
 			received.multicastListenerReport.Increment()
+		case header.ICMPv6MulticastListenerV2Report:
+			received.multicastListenerReportV2.Increment()
 		case header.ICMPv6MulticastListenerDone:
 			received.multicastListenerDone.Increment()
 		default:
@@ -872,13 +879,17 @@ func (e *endpoint) handleICMP(pkt *stack.PacketBuffer, hasFragmentHeader bool, r
 		switch icmpType {
 		case header.ICMPv6MulticastListenerQuery:
 			e.mu.Lock()
-			e.mu.mld.handleMulticastListenerQuery(header.MLD(h.MessageBody()))
+			if len(icmpBody) >= header.MLDv2QueryMinimumSize {
+				e.mu.mld.handleMulticastListenerQueryV2(header.MLDv2Query(icmpBody))
+			} else {
+				e.mu.mld.handleMulticastListenerQuery(header.MLD(icmpBody))
+			}
 			e.mu.Unlock()
 		case header.ICMPv6MulticastListenerReport:
 			e.mu.Lock()
-			e.mu.mld.handleMulticastListenerReport(header.MLD(h.MessageBody()))
+			e.mu.mld.handleMulticastListenerReport(header.MLD(icmpBody))
 			e.mu.Unlock()
-		case header.ICMPv6MulticastListenerDone:
+		case header.ICMPv6MulticastListenerDone, header.ICMPv6MulticastListenerV2Report:
 		default:
 			panic(fmt.Sprintf("unrecognized MLD message = %d", icmpType))
 		}
@@ -901,7 +912,7 @@ func (e *endpoint) LinkAddressRequest(targetAddr, localAddr tcpip.Address, remot
 		remoteLinkAddr = header.EthernetAddressFromMulticastIPv6Address(remoteAddr)
 	}
 
-	if len(localAddr) == 0 {
+	if localAddr.BitLen() == 0 {
 		// Find an address that we can use as our source address.
 		addressEndpoint := e.AcquireOutgoingPrimaryAddress(remoteAddr, false /* allowExpired */)
 		if addressEndpoint == nil {
@@ -950,7 +961,7 @@ type icmpReason interface {
 type icmpReasonParameterProblem struct {
 	code header.ICMPv6Code
 
-	// pointer is defined in the RFC 4443 setion 3.4 which reads:
+	// pointer is defined in the RFC 4443 section 3.4 which reads:
 	//
 	//  Pointer         Identifies the octet offset within the invoking packet
 	//                  where the error was detected.
@@ -1042,7 +1053,7 @@ func (*icmpReasonReassemblyTimeout) respondsToMulticast() bool {
 
 // returnError takes an error descriptor and generates the appropriate ICMP
 // error packet for IPv6 and sends it.
-func (p *protocol) returnError(reason icmpReason, pkt *stack.PacketBuffer, deliveredLocally bool) tcpip.Error {
+func (p *protocol) returnError(reason icmpReason, pkt stack.PacketBufferPtr, deliveredLocally bool) tcpip.Error {
 	origIPHdr := header.IPv6(pkt.NetworkHeader().Slice())
 	origIPHdrSrc := origIPHdr.SourceAddress()
 	origIPHdrDst := origIPHdr.DestinationAddress()
@@ -1084,7 +1095,7 @@ func (p *protocol) returnError(reason icmpReason, pkt *stack.PacketBuffer, deliv
 	// packets", as per RFC 4291 section 2.7.
 	localAddr := origIPHdrDst
 	if !deliveredLocally || isOrigDstMulticast {
-		localAddr = ""
+		localAddr = tcpip.Address{}
 	}
 	// Even if we were able to receive a packet from some remote, we may not have
 	// a route to it - the remote may be blocked via routing rules. We must always
@@ -1165,7 +1176,7 @@ func (p *protocol) returnError(reason icmpReason, pkt *stack.PacketBuffer, deliv
 	if payloadLen > available {
 		payloadLen = available
 	}
-	payload := bufferv2.MakeWithView(network)
+	payload := buffer.MakeWithView(network)
 	payload.Append(transport)
 	dataBuf := pkt.Data().ToBuffer()
 	payload.Merge(&dataBuf)
@@ -1183,13 +1194,13 @@ func (p *protocol) returnError(reason icmpReason, pkt *stack.PacketBuffer, deliv
 	icmpHdr.SetCode(icmpCode)
 	icmpHdr.SetTypeSpecific(typeSpecific)
 
-	dataRange := newPkt.Data().AsRange()
+	pktData := newPkt.Data()
 	icmpHdr.SetChecksum(header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
 		Header:      icmpHdr,
 		Src:         route.LocalAddress(),
 		Dst:         route.RemoteAddress(),
-		PayloadCsum: dataRange.Checksum(),
-		PayloadLen:  dataRange.Size(),
+		PayloadCsum: pktData.Checksum(),
+		PayloadLen:  pktData.Size(),
 	}))
 	if err := route.WritePacket(
 		stack.NetworkHeaderParams{
@@ -1207,14 +1218,14 @@ func (p *protocol) returnError(reason icmpReason, pkt *stack.PacketBuffer, deliv
 }
 
 // OnReassemblyTimeout implements fragmentation.TimeoutHandler.
-func (p *protocol) OnReassemblyTimeout(pkt *stack.PacketBuffer) {
+func (p *protocol) OnReassemblyTimeout(pkt stack.PacketBufferPtr) {
 	// OnReassemblyTimeout sends a Time Exceeded Message as per RFC 2460 Section
 	// 4.5:
 	//
 	//   If the first fragment (i.e., the one with a Fragment Offset of zero) has
 	//   been received, an ICMP Time Exceeded -- Fragment Reassembly Time Exceeded
 	//   message should be sent to the source of that fragment.
-	if pkt != nil {
+	if !pkt.IsNil() {
 		p.returnError(&icmpReasonReassemblyTimeout{}, pkt, true /* deliveredLocally */)
 	}
 }

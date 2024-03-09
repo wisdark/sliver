@@ -38,7 +38,6 @@ package handlers
 */
 
 import (
-	"encoding/base64"
 	"fmt"
 
 	"github.com/bishopfox/sliver/protobuf/sliverpb"
@@ -205,20 +204,18 @@ func serverKeyExchange(implantConn *core.ImplantConnection, peerEnvelope *sliver
 	// everything after that is the encrypted session key
 	var publicKeyDigest [32]byte
 	copy(publicKeyDigest[:], serverKeyEx.SessionKey[:32])
-	implantConfig, err := db.ImplantConfigByECCPublicKeyDigest(publicKeyDigest)
-	if err != nil || implantConfig == nil {
+	implantBuild, err := db.ImplantBuildByPublicKeyDigest(publicKeyDigest)
+	if err != nil || implantBuild == nil {
 		pivotLog.Warn("Unknown public key digest")
 		return nil
 	}
-	publicKey, err := base64.RawStdEncoding.DecodeString(implantConfig.ECCPublicKey)
-	if err != nil || len(publicKey) != 32 {
-		pivotLog.Warn("Failed to decode public key")
-		return nil
-	}
-	var senderPublicKey [32]byte
-	copy(senderPublicKey[:], publicKey)
-	serverKeyPair := cryptography.ECCServerKeyPair()
-	rawSessionKey, err := cryptography.ECCDecrypt(&senderPublicKey, serverKeyPair.Private, serverKeyEx.SessionKey[32:])
+
+	serverKeyPair := cryptography.AgeServerKeyPair()
+	rawSessionKey, err := cryptography.AgeKeyExFromImplant(
+		serverKeyPair.Private,
+		implantBuild.PeerPrivateKey,
+		serverKeyEx.SessionKey[32:],
+	)
 	if err != nil {
 		pivotLog.Warn("Failed to decrypt session key from origin")
 		return nil

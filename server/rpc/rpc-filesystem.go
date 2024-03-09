@@ -29,6 +29,7 @@ import (
 	"github.com/bishopfox/sliver/server/db"
 	"github.com/bishopfox/sliver/server/db/models"
 	"github.com/bishopfox/sliver/server/log"
+	"github.com/bishopfox/sliver/util/encoders"
 )
 
 var (
@@ -48,6 +49,16 @@ func (rpc *Server) Ls(ctx context.Context, req *sliverpb.LsReq) (*sliverpb.Ls, e
 // Mv - Move or rename a file
 func (rpc *Server) Mv(ctx context.Context, req *sliverpb.MvReq) (*sliverpb.Mv, error) {
 	resp := &sliverpb.Mv{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// Cp - Copy a file to another location
+func (rpc *Server) Cp(ctx context.Context, req *sliverpb.CpReq) (*sliverpb.Cp, error) {
+	resp := &sliverpb.Cp{Response: &commonpb.Response{}}
 	err := rpc.GenericHandler(req, resp)
 	if err != nil {
 		return nil, err
@@ -118,6 +129,78 @@ func (rpc *Server) Upload(ctx context.Context, req *sliverpb.UploadReq) (*sliver
 	return resp, nil
 }
 
+// Chmod - Change permission on a file or directory
+func (rpc *Server) Chmod(ctx context.Context, req *sliverpb.ChmodReq) (*sliverpb.Chmod, error) {
+	resp := &sliverpb.Chmod{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// Chown - Change owner on a file or directory
+func (rpc *Server) Chown(ctx context.Context, req *sliverpb.ChownReq) (*sliverpb.Chown, error) {
+	resp := &sliverpb.Chown{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// Chtimes - Change file access and modification times on a file or directory
+func (rpc *Server) Chtimes(ctx context.Context, req *sliverpb.ChtimesReq) (*sliverpb.Chtimes, error) {
+	resp := &sliverpb.Chtimes{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// MemfilesList - List memfiles
+func (rpc *Server) MemfilesList(ctx context.Context, req *sliverpb.MemfilesListReq) (*sliverpb.Ls, error) {
+	resp := &sliverpb.Ls{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// MemfilesAdd - Add memfile
+func (rpc *Server) MemfilesAdd(ctx context.Context, req *sliverpb.MemfilesAddReq) (*sliverpb.MemfilesAdd, error) {
+	resp := &sliverpb.MemfilesAdd{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// MemfilesRm - Close memfile
+func (rpc *Server) MemfilesRm(ctx context.Context, req *sliverpb.MemfilesRmReq) (*sliverpb.MemfilesRm, error) {
+	resp := &sliverpb.MemfilesRm{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func hashUploadData(encoder string, data []byte) [32]byte {
+	if encoder == "gzip" {
+		decodedData, err := new(encoders.Gzip).Decode(data)
+		if err != nil {
+			return sha256.Sum256(nil)
+		}
+		return sha256.Sum256(decodedData)
+	} else {
+		return sha256.Sum256(data)
+	}
+}
+
 func trackIOC(req *sliverpb.UploadReq, resp *sliverpb.Upload) {
 	fsLog.Debugf("Adding IOC to database ...")
 	request := req.GetRequest()
@@ -136,13 +219,23 @@ func trackIOC(req *sliverpb.UploadReq, resp *sliverpb.Upload) {
 		return
 	}
 
-	sum := sha256.Sum256(req.Data)
+	sum := hashUploadData(req.Encoder, req.Data)
 	ioc := &models.IOC{
-		HostID:   host.ID,
+		HostID:   host.HostUUID,
 		Path:     resp.Path,
 		FileHash: fmt.Sprintf("%x", sum),
 	}
 	if db.Session().Create(ioc).Error != nil {
 		fsLog.Error("Failed to create IOC")
 	}
+}
+
+// Grep - Search a file or directory for text matching a regex
+func (rpc *Server) Grep(ctx context.Context, req *sliverpb.GrepReq) (*sliverpb.Grep, error) {
+	resp := &sliverpb.Grep{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(req, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

@@ -144,7 +144,7 @@ func (*protocol) ParsePorts(v []byte) (src, dst uint16, err tcpip.Error) {
 // to a specific processing queue. Each queue is serviced by its own processor
 // goroutine which is responsible for dequeuing and doing full TCP dispatch of
 // the packet.
-func (p *protocol) QueuePacket(ep stack.TransportEndpoint, id stack.TransportEndpointID, pkt *stack.PacketBuffer) {
+func (p *protocol) QueuePacket(ep stack.TransportEndpoint, id stack.TransportEndpointID, pkt stack.PacketBufferPtr) {
 	p.dispatcher.queuePacket(ep, id, p.stack.Clock(), pkt)
 }
 
@@ -155,7 +155,7 @@ func (p *protocol) QueuePacket(ep stack.TransportEndpoint, id stack.TransportEnd
 // a reset is sent in response to any incoming segment except another reset. In
 // particular, SYNs addressed to a non-existent connection are rejected by this
 // means."
-func (p *protocol) HandleUnknownDestinationPacket(id stack.TransportEndpointID, pkt *stack.PacketBuffer) stack.UnknownDestinationPacketDisposition {
+func (p *protocol) HandleUnknownDestinationPacket(id stack.TransportEndpointID, pkt stack.PacketBufferPtr) stack.UnknownDestinationPacketDisposition {
 	s, err := newIncomingSegment(id, p.stack.Clock(), pkt)
 	if err != nil {
 		return stack.UnknownDestinationPacketMalformed
@@ -185,8 +185,8 @@ func (p *protocol) tsOffset(src, dst tcpip.Address) tcp.TSOffset {
 	// Per hash.Hash.Writer:
 	//
 	// It never returns an error.
-	_, _ = h.Write([]byte(src))
-	_, _ = h.Write([]byte(dst))
+	_, _ = h.Write(src.AsSlice())
+	_, _ = h.Write(dst.AsSlice())
 	return tcp.NewTSOffset(h.Sum32())
 }
 
@@ -501,12 +501,13 @@ func (p *protocol) Resume() {
 }
 
 // Parse implements stack.TransportProtocol.Parse.
-func (*protocol) Parse(pkt *stack.PacketBuffer) bool {
+func (*protocol) Parse(pkt stack.PacketBufferPtr) bool {
 	return parse.TCP(pkt)
 }
 
 // NewProtocol returns a TCP transport protocol.
 func NewProtocol(s *stack.Stack) stack.TransportProtocol {
+	rng := s.SecureRNG()
 	p := protocol{
 		stack: s,
 		sendBufferSize: tcpip.TCPSendBufferSizeRangeOption{
@@ -521,6 +522,7 @@ func NewProtocol(s *stack.Stack) stack.TransportProtocol {
 		},
 		congestionControl:          ccReno,
 		availableCongestionControl: []string{ccReno, ccCubic},
+		moderateReceiveBuffer:      true,
 		lingerTimeout:              DefaultTCPLingerTimeout,
 		timeWaitTimeout:            DefaultTCPTimeWaitTimeout,
 		timeWaitReuse:              tcpip.TCPTimeWaitReuseLoopbackOnly,
@@ -529,11 +531,11 @@ func NewProtocol(s *stack.Stack) stack.TransportProtocol {
 		maxRTO:                     MaxRTO,
 		maxRetries:                 MaxRetries,
 		recovery:                   tcpip.TCPRACKLossDetection,
-		seqnumSecret:               s.Rand().Uint32(),
-		portOffsetSecret:           s.Rand().Uint32(),
-		tsOffsetSecret:             s.Rand().Uint32(),
+		seqnumSecret:               rng.Uint32(),
+		portOffsetSecret:           rng.Uint32(),
+		tsOffsetSecret:             rng.Uint32(),
 	}
-	p.dispatcher.init(s.Rand(), runtime.GOMAXPROCS(0))
+	p.dispatcher.init(s.InsecureRNG(), runtime.GOMAXPROCS(0))
 	return &p
 }
 

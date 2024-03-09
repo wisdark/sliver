@@ -23,19 +23,20 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/rsteube/carapace"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/bishopfox/sliver/client/assets"
 	"github.com/bishopfox/sliver/client/command/alias"
 	"github.com/bishopfox/sliver/client/command/extensions"
 	"github.com/bishopfox/sliver/client/command/settings"
 	"github.com/bishopfox/sliver/client/console"
-	"github.com/bishopfox/sliver/server/cryptography/minisign"
-	"github.com/desertbit/grumble"
-	"github.com/jedib0t/go-pretty/v6/table"
-	"golang.org/x/term"
+	"github.com/bishopfox/sliver/util/minisign"
 )
 
 // ArmoryIndex - Index JSON containing alias/extension/bundle information
@@ -104,10 +105,10 @@ var (
 )
 
 // ArmoryCmd - The main armory command
-func ArmoryCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
+func ArmoryCmd(cmd *cobra.Command, con *console.SliverClient, args []string) {
 	armoriesConfig := assets.GetArmoriesConfig()
 	con.PrintInfof("Fetching %d armory index(es) ... ", len(armoriesConfig))
-	clientConfig := parseArmoryHTTPConfig(ctx)
+	clientConfig := parseArmoryHTTPConfig(cmd)
 	indexes := fetchIndexes(armoriesConfig, clientConfig)
 	if len(indexes) != len(armoriesConfig) {
 		con.Printf("errors!\n")
@@ -140,7 +141,7 @@ func ArmoryCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 				if cacheEntry.Pkg.IsAlias {
 					aliases = append(aliases, cacheEntry.Alias)
 				} else {
-					exts = append(exts, cacheEntry.Extension)
+					exts = append(exts, cacheEntry.Extension) //todo: check this isn't a bug
 				}
 			}
 			return true
@@ -182,7 +183,7 @@ func packagesInCache() ([]*alias.AliasManifest, []*extensions.ExtensionManifest)
 			if cacheEntry.Pkg.IsAlias {
 				aliases = append(aliases, cacheEntry.Alias)
 			} else {
-				exts = append(exts, cacheEntry.Extension)
+				exts = append(exts, cacheEntry.Extension) //todo: check this isn't a bug
 			}
 		}
 		return true
@@ -201,40 +202,59 @@ func bundlesInCache() []*ArmoryBundle {
 }
 
 // AliasExtensionOrBundleCompleter - Completer for alias, extension, and bundle names
-func AliasExtensionOrBundleCompleter(prefix string, args []string, con *console.SliverConsoleClient) []string {
-	results := []string{}
-	aliases, exts := packagesInCache()
-	bundles := bundlesInCache()
-	for _, aliasPkg := range aliases {
-		if strings.HasPrefix(aliasPkg.CommandName, prefix) {
+func AliasExtensionOrBundleCompleter() carapace.Action {
+	comps := func(ctx carapace.Context) carapace.Action {
+		var action carapace.Action
+
+		results := []string{}
+		aliases, exts := packagesInCache()
+		bundles := bundlesInCache()
+
+		for _, aliasPkg := range aliases {
 			results = append(results, aliasPkg.CommandName)
+			results = append(results, aliasPkg.Help)
 		}
-	}
-	for _, extensionPkg := range exts {
-		if strings.HasPrefix(extensionPkg.CommandName, prefix) {
-			results = append(results, extensionPkg.CommandName)
+		aliasesComps := carapace.ActionValuesDescribed(results...).Tag("aliases").Invoke(ctx)
+		results = make([]string, 0)
+
+		for _, extension := range exts {
+			for _, extensionPkg := range extension.ExtCommand {
+				results = append(results, extensionPkg.CommandName)
+				results = append(results, extensionPkg.Help)
+			}
 		}
-	}
-	for _, bundle := range bundles {
-		if strings.HasPrefix(bundle.Name, prefix) {
+		extentionComps := carapace.ActionValuesDescribed(results...).Tag("extensions").Invoke(ctx)
+		results = make([]string, 0)
+
+		for _, bundle := range bundles {
 			results = append(results, bundle.Name)
 		}
+		bundleComps := carapace.ActionValues(results...).Tag("bundles").Invoke(ctx)
+
+		return action.Invoke(ctx).Merge(
+			aliasesComps,
+			extentionComps,
+			bundleComps,
+		).ToA()
 	}
-	return results
+
+	return carapace.ActionCallback(comps)
 }
 
 // PrintArmoryPackages - Prints the armory packages
-func PrintArmoryPackages(aliases []*alias.AliasManifest, exts []*extensions.ExtensionManifest, con *console.SliverConsoleClient) {
+func PrintArmoryPackages(aliases []*alias.AliasManifest, exts []*extensions.ExtensionManifest, con *console.SliverClient) {
 	width, _, err := term.GetSize(0)
 	if err != nil {
-		width = 999
+		width = 1
 	}
 
 	tw := table.NewWriter()
 	tw.SetStyle(settings.GetTableStyle(con))
 	tw.SetTitle(console.Bold + "Packages" + console.Normal)
 
-	if con.Settings.SmallTermWidth < width {
+	urlMargin := 150 // Extra margin needed to show URL column
+
+	if con.Settings.SmallTermWidth+urlMargin < width {
 		tw.AppendHeader(table.Row{
 			"Command Name",
 			"Version",
@@ -273,23 +293,27 @@ func PrintArmoryPackages(aliases []*alias.AliasManifest, exts []*extensions.Exte
 			URL:         aliasPkg.RepoURL,
 		})
 	}
-	for _, extension := range exts {
-		entries = append(entries, pkgInfo{
-			CommandName: extension.CommandName,
-			Version:     extension.Version,
-			Type:        "Extension",
-			Help:        extension.Help,
-			URL:         extension.RepoURL,
-		})
+	for _, extm := range exts {
+		for _, extension := range extm.ExtCommand {
+			entries = append(entries, pkgInfo{
+				CommandName: extension.CommandName,
+				Version:     extension.Manifest.Version,
+				Type:        "Extension",
+				Help:        extension.Help,
+				URL:         extension.Manifest.RepoURL,
+			})
+		}
 	}
+
+	sliverMenu := con.App.Menu("implant")
 
 	rows := []table.Row{}
 	for _, pkg := range entries {
 		color := console.Normal
-		if extensions.CmdExists(pkg.CommandName, con.App) {
+		if extensions.CmdExists(pkg.CommandName, sliverMenu.Command) {
 			color = console.Green
 		}
-		if con.Settings.SmallTermWidth < width {
+		if con.Settings.SmallTermWidth+urlMargin < width {
 			rows = append(rows, table.Row{
 				fmt.Sprintf(color+"%s"+console.Normal, pkg.CommandName),
 				fmt.Sprintf(color+"%s"+console.Normal, pkg.Version),
@@ -311,7 +335,7 @@ func PrintArmoryPackages(aliases []*alias.AliasManifest, exts []*extensions.Exte
 }
 
 // PrintArmoryBundles - Prints the armory bundles
-func PrintArmoryBundles(bundles []*ArmoryBundle, con *console.SliverConsoleClient) {
+func PrintArmoryBundles(bundles []*ArmoryBundle, con *console.SliverClient) {
 	tw := table.NewWriter()
 	tw.SetStyle(settings.GetTableStyle(con))
 	tw.SetTitle(console.Bold + "Bundles" + console.Normal)
@@ -348,15 +372,15 @@ func PrintArmoryBundles(bundles []*ArmoryBundle, con *console.SliverConsoleClien
 	con.Printf("%s\n", tw.Render())
 }
 
-func parseArmoryHTTPConfig(ctx *grumble.Context) ArmoryHTTPConfig {
+func parseArmoryHTTPConfig(cmd *cobra.Command) ArmoryHTTPConfig {
 	var proxyURL *url.URL
-	rawProxyURL := ctx.Flags.String("proxy")
+	rawProxyURL, _ := cmd.Flags().GetString("proxy")
 	if rawProxyURL != "" {
 		proxyURL, _ = url.Parse(rawProxyURL)
 	}
 
 	timeout := defaultTimeout
-	rawTimeout := ctx.Flags.String("timeout")
+	rawTimeout, _ := cmd.Flags().GetString("timeout")
 	if rawTimeout != "" {
 		var err error
 		timeout, err = time.ParseDuration(rawTimeout)
@@ -365,11 +389,14 @@ func parseArmoryHTTPConfig(ctx *grumble.Context) ArmoryHTTPConfig {
 		}
 	}
 
+	ignoreCache, _ := cmd.Flags().GetBool("ignore-cache")
+	disableTLSValidation, _ := cmd.Flags().GetBool("insecure")
+
 	return ArmoryHTTPConfig{
-		IgnoreCache:          ctx.Flags.Bool("ignore-cache"),
+		IgnoreCache:          ignoreCache,
 		ProxyURL:             proxyURL,
 		Timeout:              timeout,
-		DisableTLSValidation: ctx.Flags.Bool("insecure"),
+		DisableTLSValidation: disableTLSValidation,
 	}
 }
 
@@ -484,7 +511,7 @@ func fetchPackageSignature(wg *sync.WaitGroup, armoryConfig *assets.ArmoryConfig
 
 	var sig *minisign.Signature
 	if pkgParser, ok := pkgParsers[repoURL.Hostname()]; ok {
-		sig, _, err = pkgParser(armoryPkg, true, clientConfig)
+		sig, _, err = pkgParser(armoryConfig, armoryPkg, true, clientConfig)
 	} else {
 		sig, _, err = DefaultArmoryPkgParser(armoryConfig, armoryPkg, true, clientConfig)
 	}
